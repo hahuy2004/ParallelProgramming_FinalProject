@@ -1,5 +1,5 @@
 #include "../include/autoencoder_gpu.h"
-#include "../include/gpu_kernels.h"
+#include "../cuda/gpu_kernels.h"
 #include <cuda_runtime.h>
 #include <iostream>
 #include <fstream>
