@@ -1,4 +1,4 @@
-#include "autoencoder_cpu.h"
+#include "../include/autoencoder_cpu.h"
 #include <iostream>
 #include <fstream>
 #include <cmath>
