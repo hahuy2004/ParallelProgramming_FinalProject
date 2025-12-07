@@ -305,3 +305,209 @@ void launch_conv2d_relu_forward(const float* d_input, float* d_output,
     
     CUDA_CHECK(cudaGetLastError());
 }
+
+// ==================== BACKWARD PASS KERNELS ====================
+
+// Conv2D Backward: compute gradients for input, weights, and bias
+__global__ void conv2d_backward_kernel(const float* grad_output, const float* input,
+                                       const float* weights, float* grad_input,
+                                       float* grad_weights, float* grad_bias,
+                                       int batch, int in_h, int in_w, int in_c,
+                                       int out_c, int kernel_size, int stride, int padding) {
+    int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
+    int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
+    
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = batch * out_h * out_w * out_c;
+    
+    if (idx < total) {
+        int oc = idx % out_c;
+        int ow = (idx / out_c) % out_w;
+        int oh = (idx / out_c / out_w) % out_h;
+        int b = idx / out_c / out_w / out_h;
+        
+        float grad_out_val = grad_output[idx];
+        
+        // Accumulate gradient for bias
+        atomicAdd(&grad_bias[oc], grad_out_val);
+        
+        // Compute gradients for weights and input
+        for (int ic = 0; ic < in_c; ++ic) {
+            for (int kh = 0; kh < kernel_size; ++kh) {
+                for (int kw = 0; kw < kernel_size; ++kw) {
+                    int ih = oh * stride - padding + kh;
+                    int iw = ow * stride - padding + kw;
+                    
+                    if (ih >= 0 && ih < in_h && iw >= 0 && iw < in_w) {
+                        int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + ic;
+                        int w_idx = oc * in_c * kernel_size * kernel_size + 
+                                   ic * kernel_size * kernel_size + kh * kernel_size + kw;
+                        
+                        // Gradient w.r.t. weights: grad_w = input * grad_output
+                        atomicAdd(&grad_weights[w_idx], input[in_idx] * grad_out_val);
+                        
+                        // Gradient w.r.t. input: grad_input = weights * grad_output
+                        atomicAdd(&grad_input[in_idx], weights[w_idx] * grad_out_val);
+                    }
+                }
+            }
+        }
+    }
+}
+
+void launch_conv2d_backward(const float* d_grad_output, const float* d_input,
+                            const float* d_weights, float* d_grad_input,
+                            float* d_grad_weights, float* d_grad_bias,
+                            int batch, int in_h, int in_w, int in_c,
+                            int out_c, int kernel_size, int stride, int padding) {
+    int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
+    int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
+    int total = batch * out_h * out_w * out_c;
+    
+    int block_size = 256;
+    int grid_size = (total + block_size - 1) / block_size;
+    
+    conv2d_backward_kernel<<<grid_size, block_size>>>(
+        d_grad_output, d_input, d_weights, d_grad_input,
+        d_grad_weights, d_grad_bias,
+        batch, in_h, in_w, in_c, out_c, kernel_size, stride, padding);
+    
+    CUDA_CHECK(cudaGetLastError());
+}
+
+// ReLU Backward: gradient only flows through where input > 0
+__global__ void relu_backward_kernel(const float* grad_output, const float* input,
+                                     float* grad_input, int size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        grad_input[idx] = (input[idx] > 0.0f) ? grad_output[idx] : 0.0f;
+    }
+}
+
+void launch_relu_backward(const float* d_grad_output, const float* d_input,
+                         float* d_grad_input, int size) {
+    int block_size = 256;
+    int grid_size = (size + block_size - 1) / block_size;
+    
+    relu_backward_kernel<<<grid_size, block_size>>>(d_grad_output, d_input, d_grad_input, size);
+    CUDA_CHECK(cudaGetLastError());
+}
+
+// MaxPool2D Backward: route gradient to the max location
+__global__ void maxpool2d_backward_kernel(const float* grad_output, const float* input,
+                                          const float* output, float* grad_input,
+                                          int batch, int h, int w, int c,
+                                          int pool_size, int stride) {
+    int out_h = (h - pool_size) / stride + 1;
+    int out_w = (w - pool_size) / stride + 1;
+    
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = batch * out_h * out_w * c;
+    
+    if (idx < total) {
+        int ch = idx % c;
+        int ow = (idx / c) % out_w;
+        int oh = (idx / c / out_w) % out_h;
+        int b = idx / c / out_w / out_h;
+        
+        float grad_out_val = grad_output[idx];
+        float max_val = output[idx];
+        
+        // Find which input position produced the max
+        for (int ph = 0; ph < pool_size; ++ph) {
+            for (int pw = 0; pw < pool_size; ++pw) {
+                int ih = oh * stride + ph;
+                int iw = ow * stride + pw;
+                int in_idx = b * h * w * c + ih * w * c + iw * c + ch;
+                
+                // Route gradient to the max position
+                if (input[in_idx] == max_val) {
+                    atomicAdd(&grad_input[in_idx], grad_out_val);
+                }
+            }
+        }
+    }
+}
+
+void launch_maxpool2d_backward(const float* d_grad_output, const float* d_input,
+                               const float* d_output, float* d_grad_input,
+                               int batch, int h, int w, int c,
+                               int pool_size, int stride) {
+    int out_h = (h - pool_size) / stride + 1;
+    int out_w = (w - pool_size) / stride + 1;
+    int total = batch * out_h * out_w * c;
+    
+    int block_size = 256;
+    int grid_size = (total + block_size - 1) / block_size;
+    
+    maxpool2d_backward_kernel<<<grid_size, block_size>>>(
+        d_grad_output, d_input, d_output, d_grad_input,
+        batch, h, w, c, pool_size, stride);
+    
+    CUDA_CHECK(cudaGetLastError());
+}
+
+// UpSample2D Backward: sum gradients from upsampled positions
+__global__ void upsample2d_backward_kernel(const float* grad_output, float* grad_input,
+                                           int batch, int in_h, int in_w, int c,
+                                           int scale_factor) {
+    int out_h = in_h * scale_factor;
+    int out_w = in_w * scale_factor;
+    
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = batch * in_h * in_w * c;
+    
+    if (idx < total) {
+        int ch = idx % c;
+        int iw = (idx / c) % in_w;
+        int ih = (idx / c / in_w) % in_h;
+        int b = idx / c / in_w / in_h;
+        
+        float grad_sum = 0.0f;
+        
+        // Sum gradients from all upsampled positions
+        for (int sh = 0; sh < scale_factor; ++sh) {
+            for (int sw = 0; sw < scale_factor; ++sw) {
+                int oh = ih * scale_factor + sh;
+                int ow = iw * scale_factor + sw;
+                int out_idx = b * out_h * out_w * c + oh * out_w * c + ow * c + ch;
+                grad_sum += grad_output[out_idx];
+            }
+        }
+        
+        grad_input[idx] = grad_sum;
+    }
+}
+
+void launch_upsample2d_backward(const float* d_grad_output, float* d_grad_input,
+                                int batch, int in_h, int in_w, int c,
+                                int scale_factor) {
+    int total = batch * in_h * in_w * c;
+    
+    int block_size = 256;
+    int grid_size = (total + block_size - 1) / block_size;
+    
+    upsample2d_backward_kernel<<<grid_size, block_size>>>(
+        d_grad_output, d_grad_input, batch, in_h, in_w, c, scale_factor);
+    
+    CUDA_CHECK(cudaGetLastError());
+}
+
+// MSE Loss Backward: compute gradient of loss w.r.t. output
+__global__ void mse_loss_backward_kernel(const float* output, const float* target,
+                                         float* grad_output, int size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        // Gradient of MSE: d/dx (x - y)^2 = 2(x - y) / N
+        grad_output[idx] = 2.0f * (output[idx] - target[idx]) / size;
+    }
+}
+
+void launch_mse_loss_backward(const float* d_output, const float* d_target,
+                              float* d_grad_output, int size) {
+    int block_size = 256;
+    int grid_size = (size + block_size - 1) / block_size;
+    
+    mse_loss_backward_kernel<<<grid_size, block_size>>>(d_output, d_target, d_grad_output, size);
+    CUDA_CHECK(cudaGetLastError());
+}
