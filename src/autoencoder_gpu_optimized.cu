@@ -1,6 +1,6 @@
-#include "autoencoder_gpu_optimized.h"
-#include "gpu_kernels.h"
-#include "gpu_kernels_optimized.h"
+#include "../include/autoencoder_gpu_optimized.h"
+#include "../include/gpu_kernels.h"
+#include "../include/gpu_kernels_optimized.h"
 #include <cuda_runtime.h>
 #include <iostream>
 #include <fstream>

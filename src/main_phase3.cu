@@ -1,5 +1,5 @@
-#include "cifar10_loader.h"
-#include "autoencoder_gpu_optimized.h"
+#include "../include/cifar10_loader.h"
+#include "../include/autoencoder_gpu_optimized.h"
 #include <iostream>
 #include <chrono>
 

@@ -1,4 +1,4 @@
-#include "svm_classifier.h"
+#include "../include/svm_classifier.h"
 #include "../third_party/libsvm/svm.h"
 #include <iostream>
 #include <algorithm>

@@ -1,5 +1,5 @@
-#include "cifar10_loader.h"
-#include "autoencoder_cpu.h"
+#include "../include/cifar10_loader.h"
+#include "../include/autoencoder_cpu.h"
 #include <iostream>
 #include <chrono>
 

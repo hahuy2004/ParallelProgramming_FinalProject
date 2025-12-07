@@ -1,4 +1,4 @@
-#include "cifar10_loader.h"
+#include "../include/cifar10_loader.h"
 #include <fstream>
 #include <iostream>
 #include <algorithm>

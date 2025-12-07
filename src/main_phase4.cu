@@ -1,9 +1,14 @@
-#include "cifar10_loader.h"
-#include "autoencoder_gpu.h"
-#include "svm_classifier.h"
+#include "../include/cifar10_loader.h"
+#include "../include/autoencoder_cpu.h"
+#include "../include/autoencoder_gpu.h"
+#include "../include/autoencoder_gpu_optimized.h"
+#include "../include/svm_classifier.h"
 #include <iostream>
 #include <chrono>
 #include <iomanip>
+#include <string>
+#include <algorithm>
+#include <cctype>
 
 void print_confusion_matrix(const std::vector<std::vector<int>>& cm,
                            const std::vector<std::string>& class_names) {
@@ -42,9 +47,32 @@ int main(int argc, char** argv) {
     
     // Configuration
     std::string data_dir = "cifar-10-batches-bin";
-    if (argc > 1) {
-        data_dir = argv[1];
+    std::string mode = "optimized";  // Default: optimized GPU
+    
+    // Parse arguments
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--mode" || arg == "-m") {
+            if (i + 1 < argc) {
+                mode = argv[++i];
+                // Convert to lowercase
+                std::transform(mode.begin(), mode.end(), mode.begin(),
+                             [](unsigned char c){ return std::tolower(c); });
+            }
+        } else {
+            data_dir = arg;
+        }
     }
+    
+    // Validate mode
+    if (mode != "cpu" && mode != "naive" && mode != "optimized") {
+        std::cerr << "Invalid mode: " << mode << std::endl;
+        std::cerr << "Usage: " << argv[0] << " [data_dir] [--mode cpu|naive|optimized]" << std::endl;
+        std::cerr << "Default mode: optimized" << std::endl;
+        return 1;
+    }
+    
+    std::cout << "Mode: " << mode << std::endl;
     
     std::vector<std::string> class_names = {
         "airplane", "automobile", "bird", "cat", "deer",
@@ -62,29 +90,59 @@ int main(int argc, char** argv) {
     std::cout << "Training images: " << loader.get_train_size() << std::endl;
     std::cout << "Test images: " << loader.get_test_size() << std::endl;
     
-    // Load or train autoencoder
-    std::cout << "\n=== Step 2: Loading Autoencoder ===" << std::endl;
-    AutoencoderGPU autoencoder;
-    
-    std::string weights_path = "weights/autoencoder_gpu_naive.weights";
-    autoencoder.load_weights(weights_path);
-    
     // Extract features
-    std::cout << "\n=== Step 3: Extracting Features ===" << std::endl;
+    std::cout << "\n=== Step 2: Loading Autoencoder and Extracting Features ===" << std::endl;
     std::vector<float> train_features;
     std::vector<float> test_features;
     
     auto extract_start = std::chrono::high_resolution_clock::now();
     
-    std::cout << "Extracting training features..." << std::endl;
-    autoencoder.extract_features(loader.get_train_images(), 
-                                loader.get_train_size(), 
-                                train_features);
-    
-    std::cout << "Extracting test features..." << std::endl;
-    autoencoder.extract_features(loader.get_test_images(),
-                                loader.get_test_size(),
-                                test_features);
+    if (mode == "cpu") {
+        std::cout << "Using CPU Autoencoder" << std::endl;
+        AutoencoderCPU autoencoder;
+        std::string weights_path = "weights/autoencoder_cpu.weights";
+        autoencoder.load_weights(weights_path);
+        
+        std::cout << "Extracting training features..." << std::endl;
+        autoencoder.extract_features(loader.get_train_images(), 
+                                    loader.get_train_size(), 
+                                    train_features);
+        
+        std::cout << "Extracting test features..." << std::endl;
+        autoencoder.extract_features(loader.get_test_images(),
+                                    loader.get_test_size(),
+                                    test_features);
+    } else if (mode == "naive") {
+        std::cout << "Using Naive GPU Autoencoder" << std::endl;
+        AutoencoderGPU autoencoder;
+        std::string weights_path = "weights/autoencoder_gpu_naive.weights";
+        autoencoder.load_weights(weights_path);
+        
+        std::cout << "Extracting training features..." << std::endl;
+        autoencoder.extract_features(loader.get_train_images(), 
+                                    loader.get_train_size(), 
+                                    train_features);
+        
+        std::cout << "Extracting test features..." << std::endl;
+        autoencoder.extract_features(loader.get_test_images(),
+                                    loader.get_test_size(),
+                                    test_features);
+    } else {  // optimized
+        std::cout << "Using Optimized GPU Autoencoder" << std::endl;
+        AutoencoderGPUOptimized autoencoder;
+        std::string weights_path = "weights/autoencoder_gpu_optimized.weights";
+        autoencoder.load_weights(weights_path);
+        
+        std::cout << "Extracting training features..." << std::endl;
+        autoencoder.extract_features(loader.get_train_images(), 
+                                    loader.get_train_size(), 
+                                    train_features);
+        
+        std::cout << "Extracting test features..." << std::endl;
+        autoencoder.extract_features(loader.get_test_images(),
+                                    loader.get_test_size(),
+                                    test_features);
+    }
     
     auto extract_end = std::chrono::high_resolution_clock::now();
     float extract_time = std::chrono::duration<float>(extract_end - extract_start).count();
@@ -94,7 +152,7 @@ int main(int argc, char** argv) {
     std::cout << "Test features shape: (" << loader.get_test_size() << ", 8192)" << std::endl;
     
     // Train SVM
-    std::cout << "\n=== Step 4: Training SVM Classifier ===" << std::endl;
+    std::cout << "\n=== Step 3: Training SVM Classifier ===" << std::endl;
     SVMClassifier svm;
     
     auto svm_train_start = std::chrono::high_resolution_clock::now();
@@ -111,7 +169,7 @@ int main(int argc, char** argv) {
     svm.save_model("weights/svm_model.model");
     
     // Predict on test set
-    std::cout << "\n=== Step 5: Evaluating on Test Set ===" << std::endl;
+    std::cout << "\n=== Step 4: Evaluating on Test Set ===" << std::endl;
     std::vector<uint8_t> predictions;
     
     auto predict_start = std::chrono::high_resolution_clock::now();
