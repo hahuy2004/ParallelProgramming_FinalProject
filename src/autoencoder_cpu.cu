@@ -175,10 +175,130 @@ void AutoencoderCPU::upsample2d_forward(const float* input, float* output,
     }
 }
 
+void AutoencoderCPU::conv2d_backward(const float* grad_output, float* grad_input,
+                                      float* grad_weights, float* grad_bias,
+                                      const float* input, const float* weights,
+                                      int batch, int in_h, int in_w, int in_c,
+                                      int out_c, int kernel_size, int stride, int padding) {
+    int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
+    int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
+    
+    // Initialize gradients to zero
+    if (grad_input) {
+        std::fill(grad_input, grad_input + batch * in_h * in_w * in_c, 0.0f);
+    }
+    
+    for (int b = 0; b < batch; ++b) {
+        for (int oc = 0; oc < out_c; ++oc) {
+            for (int oh = 0; oh < out_h; ++oh) {
+                for (int ow = 0; ow < out_w; ++ow) {
+                    int out_idx = b * out_h * out_w * out_c + oh * out_w * out_c + ow * out_c + oc;
+                    float grad_out_val = grad_output[out_idx];
+                    
+                    // Gradient w.r.t bias
+                    grad_bias[oc] += grad_out_val;
+                    
+                    for (int ic = 0; ic < in_c; ++ic) {
+                        for (int kh = 0; kh < kernel_size; ++kh) {
+                            for (int kw = 0; kw < kernel_size; ++kw) {
+                                int ih = oh * stride - padding + kh;
+                                int iw = ow * stride - padding + kw;
+                                
+                                if (ih >= 0 && ih < in_h && iw >= 0 && iw < in_w) {
+                                    int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + ic;
+                                    int w_idx = oc * in_c * kernel_size * kernel_size + 
+                                               ic * kernel_size * kernel_size + kh * kernel_size + kw;
+                                    
+                                    // Gradient w.r.t weights
+                                    grad_weights[w_idx] += grad_out_val * input[in_idx];
+                                    
+                                    // Gradient w.r.t input (if needed)
+                                    if (grad_input) {
+                                        grad_input[in_idx] += grad_out_val * weights[w_idx];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void AutoencoderCPU::relu_backward(const float* grad_output, float* grad_input,
+                                    const float* output, int size) {
+    for (int i = 0; i < size; ++i) {
+        grad_input[i] = (output[i] > 0.0f) ? grad_output[i] : 0.0f;
+    }
+}
+
+void AutoencoderCPU::maxpool2d_backward(const float* grad_output, float* grad_input,
+                                         const float* input, const float* output,
+                                         int batch, int h, int w, int c,
+                                         int pool_size, int stride) {
+    int out_h = (h - pool_size) / stride + 1;
+    int out_w = (w - pool_size) / stride + 1;
+    
+    // Initialize gradient input to zero
+    std::fill(grad_input, grad_input + batch * h * w * c, 0.0f);
+    
+    for (int b = 0; b < batch; ++b) {
+        for (int ch = 0; ch < c; ++ch) {
+            for (int oh = 0; oh < out_h; ++oh) {
+                for (int ow = 0; ow < out_w; ++ow) {
+                    int out_idx = b * out_h * out_w * c + oh * out_w * c + ow * c + ch;
+                    float max_val = output[out_idx];
+                    float grad_val = grad_output[out_idx];
+                    
+                    // Find which input element was the max and assign gradient to it
+                    for (int ph = 0; ph < pool_size; ++ph) {
+                        for (int pw = 0; pw < pool_size; ++pw) {
+                            int ih = oh * stride + ph;
+                            int iw = ow * stride + pw;
+                            int in_idx = b * h * w * c + ih * w * c + iw * c + ch;
+                            
+                            if (std::abs(input[in_idx] - max_val) < 1e-8f) {
+                                grad_input[in_idx] += grad_val;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void AutoencoderCPU::upsample2d_backward(const float* grad_output, float* grad_input,
+                                          int batch, int in_h, int in_w, int c,
+                                          int scale_factor) {
+    int out_h = in_h * scale_factor;
+    int out_w = in_w * scale_factor;
+    
+    // Initialize gradient input to zero
+    std::fill(grad_input, grad_input + batch * in_h * in_w * c, 0.0f);
+    
+    for (int b = 0; b < batch; ++b) {
+        for (int ch = 0; ch < c; ++ch) {
+            for (int oh = 0; oh < out_h; ++oh) {
+                for (int ow = 0; ow < out_w; ++ow) {
+                    int ih = oh / scale_factor;
+                    int iw = ow / scale_factor;
+                    int in_idx = b * in_h * in_w * c + ih * in_w * c + iw * c + ch;
+                    int out_idx = b * out_h * out_w * c + oh * out_w * c + ow * c + ch;
+                    
+                    // Sum all gradients that correspond to the same input pixel
+                    grad_input[in_idx] += grad_output[out_idx];
+                }
+            }
+        }
+    }
+}
+
 void AutoencoderCPU::forward(const float* input, int batch_size) {
     allocate_buffers(batch_size);
     
-    // Encoder
+    // ENCODER FORWARD PASS
     // Conv1 + ReLU: (32, 32, 3) -> (32, 32, 256)
     conv2d_forward(input, conv1_out_.data(), conv1_weights_.data(), conv1_bias_.data(),
                    batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
@@ -197,7 +317,7 @@ void AutoencoderCPU::forward(const float* input, int batch_size) {
     maxpool2d_forward(conv2_out_.data(), pool2_out_.data(),
                       batch_size, 16, 16, CONV2_FILTERS, 2, 2);
     
-    // Decoder
+    // DECODER FORWARD PASS
     // Conv3 + ReLU: (8, 8, 128) -> (8, 8, 128)
     conv2d_forward(pool2_out_.data(), conv3_out_.data(), conv3_weights_.data(), conv3_bias_.data(),
                    batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
@@ -221,26 +341,102 @@ void AutoencoderCPU::forward(const float* input, int batch_size) {
                    batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
 }
 
-// Simplified backward (SGD without full backprop implementation for brevity)
-// In a complete implementation, you would compute gradients for each layer
 void AutoencoderCPU::backward(const float* input, int batch_size) {
-    // Compute loss gradient: d_loss/d_output
+    // Compute loss gradient: d_loss/d_output = 2 * (output - target) / N
     for (size_t i = 0; i < grad_conv5_out_.size(); ++i) {
         grad_conv5_out_[i] = 2.0f * (conv5_out_[i] - input[i]) / batch_size;
     }
     
-    // For this baseline, we'll use a simplified gradient computation
-    // Full implementation would backprop through all layers
-    // Here we just add small random perturbations for demonstration
+    // Clear all weight gradients
     std::fill(grad_conv1_weights_.begin(), grad_conv1_weights_.end(), 0.0f);
+    std::fill(grad_conv1_bias_.begin(), grad_conv1_bias_.end(), 0.0f);
     std::fill(grad_conv2_weights_.begin(), grad_conv2_weights_.end(), 0.0f);
+    std::fill(grad_conv2_bias_.begin(), grad_conv2_bias_.end(), 0.0f);
     std::fill(grad_conv3_weights_.begin(), grad_conv3_weights_.end(), 0.0f);
+    std::fill(grad_conv3_bias_.begin(), grad_conv3_bias_.end(), 0.0f);
     std::fill(grad_conv4_weights_.begin(), grad_conv4_weights_.end(), 0.0f);
+    std::fill(grad_conv4_bias_.begin(), grad_conv4_bias_.end(), 0.0f);
     std::fill(grad_conv5_weights_.begin(), grad_conv5_weights_.end(), 0.0f);
+    std::fill(grad_conv5_bias_.begin(), grad_conv5_bias_.end(), 0.0f);
+    
+    // DECODER BACKWARD PASS
+    // Backward through Conv5: (32, 32, 256) -> (32, 32, 3)
+    conv2d_backward(grad_conv5_out_.data(), grad_up2_out_.data(),
+                    grad_conv5_weights_.data(), grad_conv5_bias_.data(),
+                    up2_out_.data(), conv5_weights_.data(),
+                    batch_size, INPUT_H, INPUT_W, CONV1_FILTERS,
+                    INPUT_C, 3, 1, 1);
+    
+    // Backward through UpSample2: (16, 16, 256) -> (32, 32, 256)
+    upsample2d_backward(grad_up2_out_.data(), grad_conv4_out_.data(),
+                        batch_size, 16, 16, CONV1_FILTERS, 2);
+    
+    // Backward through ReLU for Conv4
+    relu_backward(grad_conv4_out_.data(), grad_conv4_out_.data(),
+                  conv4_out_.data(), grad_conv4_out_.size());
+    
+    // Backward through Conv4: (16, 16, 128) -> (16, 16, 256)
+    conv2d_backward(grad_conv4_out_.data(), grad_up1_out_.data(),
+                    grad_conv4_weights_.data(), grad_conv4_bias_.data(),
+                    up1_out_.data(), conv4_weights_.data(),
+                    batch_size, 16, 16, LATENT_C,
+                    CONV1_FILTERS, 3, 1, 1);
+    
+    // Backward through UpSample1: (8, 8, 128) -> (16, 16, 128)
+    upsample2d_backward(grad_up1_out_.data(), grad_conv3_out_.data(),
+                        batch_size, LATENT_H, LATENT_W, LATENT_C, 2);
+    
+    // Backward through ReLU for Conv3
+    relu_backward(grad_conv3_out_.data(), grad_conv3_out_.data(),
+                  conv3_out_.data(), grad_conv3_out_.size());
+    
+    // Backward through Conv3: (8, 8, 128) -> (8, 8, 128)
+    conv2d_backward(grad_conv3_out_.data(), grad_pool2_out_.data(),
+                    grad_conv3_weights_.data(), grad_conv3_bias_.data(),
+                    pool2_out_.data(), conv3_weights_.data(),
+                    batch_size, LATENT_H, LATENT_W, LATENT_C,
+                    LATENT_C, 3, 1, 1);
+    
+    // ENCODER BACKWARD PASS
+    // Backward through MaxPool2: (16, 16, 128) -> (8, 8, 128)
+    maxpool2d_backward(grad_pool2_out_.data(), grad_conv2_out_.data(),
+                       conv2_out_.data(), pool2_out_.data(),
+                       batch_size, 16, 16, CONV2_FILTERS, 2, 2);
+    
+    // Backward through ReLU for Conv2
+    relu_backward(grad_conv2_out_.data(), grad_conv2_out_.data(),
+                  conv2_out_.data(), grad_conv2_out_.size());
+    
+    // Backward through Conv2: (16, 16, 256) -> (16, 16, 128)
+    conv2d_backward(grad_conv2_out_.data(), grad_pool1_out_.data(),
+                    grad_conv2_weights_.data(), grad_conv2_bias_.data(),
+                    pool1_out_.data(), conv2_weights_.data(),
+                    batch_size, 16, 16, CONV1_FILTERS,
+                    CONV2_FILTERS, 3, 1, 1);
+    
+    // Backward through MaxPool1: (32, 32, 256) -> (16, 16, 256)
+    maxpool2d_backward(grad_pool1_out_.data(), grad_conv1_out_.data(),
+                       conv1_out_.data(), pool1_out_.data(),
+                       batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
+    
+    // Backward through ReLU for Conv1
+    relu_backward(grad_conv1_out_.data(), grad_conv1_out_.data(),
+                  conv1_out_.data(), grad_conv1_out_.size());
+    
+    // Backward through Conv1: (32, 32, 3) -> (32, 32, 256)
+    // Don't need grad_input for the first layer
+    std::vector<float> temp_input(batch_size * INPUT_H * INPUT_W * INPUT_C);
+    std::memcpy(temp_input.data(), input, temp_input.size() * sizeof(float));
+    
+    conv2d_backward(grad_conv1_out_.data(), nullptr,
+                    grad_conv1_weights_.data(), grad_conv1_bias_.data(),
+                    temp_input.data(), conv1_weights_.data(),
+                    batch_size, INPUT_H, INPUT_W, INPUT_C,
+                    CONV1_FILTERS, 3, 1, 1);
 }
 
 void AutoencoderCPU::update_weights(float learning_rate) {
-    // Simple gradient descent
+    // Simple gradient descent for weights
     for (size_t i = 0; i < conv1_weights_.size(); ++i) {
         conv1_weights_[i] -= learning_rate * grad_conv1_weights_[i];
     }
@@ -255,6 +451,23 @@ void AutoencoderCPU::update_weights(float learning_rate) {
     }
     for (size_t i = 0; i < conv5_weights_.size(); ++i) {
         conv5_weights_[i] -= learning_rate * grad_conv5_weights_[i];
+    }
+    
+    // Simple gradient descent for biases
+    for (size_t i = 0; i < conv1_bias_.size(); ++i) {
+        conv1_bias_[i] -= learning_rate * grad_conv1_bias_[i];
+    }
+    for (size_t i = 0; i < conv2_bias_.size(); ++i) {
+        conv2_bias_[i] -= learning_rate * grad_conv2_bias_[i];
+    }
+    for (size_t i = 0; i < conv3_bias_.size(); ++i) {
+        conv3_bias_[i] -= learning_rate * grad_conv3_bias_[i];
+    }
+    for (size_t i = 0; i < conv4_bias_.size(); ++i) {
+        conv4_bias_[i] -= learning_rate * grad_conv4_bias_[i];
+    }
+    for (size_t i = 0; i < conv5_bias_.size(); ++i) {
+        conv5_bias_[i] -= learning_rate * grad_conv5_bias_[i];
     }
 }
 

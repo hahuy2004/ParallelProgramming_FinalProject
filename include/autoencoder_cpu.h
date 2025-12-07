@@ -112,17 +112,17 @@ private:
                            int scale_factor);
     
     // Backward pass layers
-    void conv2d_backward(const float* input, const float* grad_output,
-                        float* grad_input, float* grad_weights, float* grad_bias,
-                        const float* weights,
+    void conv2d_backward(const float* grad_output, float* grad_input,
+                        float* grad_weights, float* grad_bias,
+                        const float* input, const float* weights,
                         int batch, int in_h, int in_w, int in_c,
                         int out_c, int kernel_size, int stride, int padding);
     
-    void relu_backward(const float* input, const float* grad_output,
-                      float* grad_input, int size);
+    void relu_backward(const float* grad_output, float* grad_input,
+                      const float* output, int size);
     
-    void maxpool2d_backward(const float* input, const float* output,
-                           const float* grad_output, float* grad_input,
+    void maxpool2d_backward(const float* grad_output, float* grad_input,
+                           const float* input, const float* output,
                            int batch, int h, int w, int c,
                            int pool_size, int stride);
     

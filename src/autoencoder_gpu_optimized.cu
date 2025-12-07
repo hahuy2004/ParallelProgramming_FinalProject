@@ -45,6 +45,27 @@ AutoencoderGPUOptimized::AutoencoderGPUOptimized() : current_batch_size_(0) {
     d_up2_out_ = nullptr;
     d_conv5_out_ = nullptr;
     
+    d_grad_conv5_out_ = nullptr;
+    d_grad_up2_out_ = nullptr;
+    d_grad_conv4_out_ = nullptr;
+    d_grad_up1_out_ = nullptr;
+    d_grad_conv3_out_ = nullptr;
+    d_grad_pool2_out_ = nullptr;
+    d_grad_conv2_out_ = nullptr;
+    d_grad_pool1_out_ = nullptr;
+    d_grad_conv1_out_ = nullptr;
+    
+    d_grad_conv1_weights_ = nullptr;
+    d_grad_conv1_bias_ = nullptr;
+    d_grad_conv2_weights_ = nullptr;
+    d_grad_conv2_bias_ = nullptr;
+    d_grad_conv3_weights_ = nullptr;
+    d_grad_conv3_bias_ = nullptr;
+    d_grad_conv4_weights_ = nullptr;
+    d_grad_conv4_bias_ = nullptr;
+    d_grad_conv5_weights_ = nullptr;
+    d_grad_conv5_bias_ = nullptr;
+    
     d_loss_ = nullptr;
     
     initialize_weights();
@@ -94,6 +115,18 @@ void AutoencoderGPUOptimized::initialize_weights() {
     
     CUDA_CHECK(cudaMalloc(&d_loss_, sizeof(float)));
     
+    // Allocate gradient buffers for weights
+    CUDA_CHECK(cudaMalloc(&d_grad_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv1_bias_, CONV1_FILTERS * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv2_weights_, CONV2_FILTERS * CONV1_FILTERS * 3 * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv2_bias_, CONV2_FILTERS * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv3_weights_, LATENT_C * LATENT_C * 3 * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv3_bias_, LATENT_C * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv4_weights_, CONV1_FILTERS * LATENT_C * 3 * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv4_bias_, CONV1_FILTERS * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv5_bias_, INPUT_C * sizeof(float)));
+    
     std::cout << "GPU Optimized weights initialized" << std::endl;
 }
 
@@ -113,6 +146,16 @@ void AutoencoderGPUOptimized::allocate_device_memory(int batch_size) {
         cudaFree(d_up2_out_);
         cudaFree(d_conv5_out_);
         
+        cudaFree(d_grad_conv5_out_);
+        cudaFree(d_grad_up2_out_);
+        cudaFree(d_grad_conv4_out_);
+        cudaFree(d_grad_up1_out_);
+        cudaFree(d_grad_conv3_out_);
+        cudaFree(d_grad_pool2_out_);
+        cudaFree(d_grad_conv2_out_);
+        cudaFree(d_grad_pool1_out_);
+        cudaFree(d_grad_conv1_out_);
+        
         if (h_pinned_input_) cudaFreeHost(h_pinned_input_);
         if (h_pinned_output_) cudaFreeHost(h_pinned_output_);
     }
@@ -130,6 +173,17 @@ void AutoencoderGPUOptimized::allocate_device_memory(int batch_size) {
     CUDA_CHECK(cudaMalloc(&d_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_up2_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_conv5_out_, batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float)));
+    
+    // Allocate gradient buffers for activations
+    CUDA_CHECK(cudaMalloc(&d_grad_conv5_out_, batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_up2_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_up1_out_, batch_size * 16 * 16 * LATENT_C * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_pool2_out_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_pool1_out_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float)));
     
     // Allocate pinned host memory for faster transfers
     CUDA_CHECK(cudaMallocHost(&h_pinned_input_, batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float)));
@@ -158,6 +212,27 @@ void AutoencoderGPUOptimized::free_device_memory() {
     if (d_conv4_out_) cudaFree(d_conv4_out_);
     if (d_up2_out_) cudaFree(d_up2_out_);
     if (d_conv5_out_) cudaFree(d_conv5_out_);
+    
+    if (d_grad_conv5_out_) cudaFree(d_grad_conv5_out_);
+    if (d_grad_up2_out_) cudaFree(d_grad_up2_out_);
+    if (d_grad_conv4_out_) cudaFree(d_grad_conv4_out_);
+    if (d_grad_up1_out_) cudaFree(d_grad_up1_out_);
+    if (d_grad_conv3_out_) cudaFree(d_grad_conv3_out_);
+    if (d_grad_pool2_out_) cudaFree(d_grad_pool2_out_);
+    if (d_grad_conv2_out_) cudaFree(d_grad_conv2_out_);
+    if (d_grad_pool1_out_) cudaFree(d_grad_pool1_out_);
+    if (d_grad_conv1_out_) cudaFree(d_grad_conv1_out_);
+    
+    if (d_grad_conv1_weights_) cudaFree(d_grad_conv1_weights_);
+    if (d_grad_conv1_bias_) cudaFree(d_grad_conv1_bias_);
+    if (d_grad_conv2_weights_) cudaFree(d_grad_conv2_weights_);
+    if (d_grad_conv2_bias_) cudaFree(d_grad_conv2_bias_);
+    if (d_grad_conv3_weights_) cudaFree(d_grad_conv3_weights_);
+    if (d_grad_conv3_bias_) cudaFree(d_grad_conv3_bias_);
+    if (d_grad_conv4_weights_) cudaFree(d_grad_conv4_weights_);
+    if (d_grad_conv4_bias_) cudaFree(d_grad_conv4_bias_);
+    if (d_grad_conv5_weights_) cudaFree(d_grad_conv5_weights_);
+    if (d_grad_conv5_bias_) cudaFree(d_grad_conv5_bias_);
     
     if (d_loss_) cudaFree(d_loss_);
 }
@@ -209,6 +284,115 @@ float AutoencoderGPUOptimized::compute_loss_gpu(int batch_size) {
     float h_loss;
     CUDA_CHECK(cudaMemcpy(&h_loss, d_loss_, sizeof(float), cudaMemcpyDeviceToHost));
     return h_loss / size;
+}
+
+void AutoencoderGPUOptimized::backward_gpu_optimized(int batch_size) {
+    int size = batch_size * INPUT_H * INPUT_W * INPUT_C;
+    
+    // Zero out all gradients
+    launch_zero_grad(d_grad_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3);
+    launch_zero_grad(d_grad_conv1_bias_, CONV1_FILTERS);
+    launch_zero_grad(d_grad_conv2_weights_, CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
+    launch_zero_grad(d_grad_conv2_bias_, CONV2_FILTERS);
+    launch_zero_grad(d_grad_conv3_weights_, LATENT_C * LATENT_C * 3 * 3);
+    launch_zero_grad(d_grad_conv3_bias_, LATENT_C);
+    launch_zero_grad(d_grad_conv4_weights_, CONV1_FILTERS * LATENT_C * 3 * 3);
+    launch_zero_grad(d_grad_conv4_bias_, CONV1_FILTERS);
+    launch_zero_grad(d_grad_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3);
+    launch_zero_grad(d_grad_conv5_bias_, INPUT_C);
+    
+    launch_zero_grad(d_grad_up2_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
+    
+    // Compute gradient of loss w.r.t. output
+    launch_mse_loss_backward(d_conv5_out_, d_input_, d_grad_conv5_out_, size);
+    
+    // Backward through decoder with OPTIMIZED kernels
+    // Conv5 backward: (32, 32, 3) <- (32, 32, 256)
+    launch_conv2d_shared_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_,
+                                 d_grad_up2_out_, d_grad_conv5_weights_, d_grad_conv5_bias_,
+                                 batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
+    
+    // Upsample2 backward: (16, 16, 256) <- (32, 32, 256)
+    launch_upsample2d_backward_optimized(d_grad_up2_out_, d_grad_conv4_out_,
+                                        batch_size, 16, 16, CONV1_FILTERS, 2);
+    
+    // ReLU4 backward (optimized)
+    launch_relu_backward_optimized(d_grad_conv4_out_, d_conv4_out_, d_grad_conv4_out_,
+                                   batch_size * 16 * 16 * CONV1_FILTERS);
+    
+    // Conv4 backward: (16, 16, 128) <- (16, 16, 256)
+    launch_conv2d_shared_backward(d_grad_conv4_out_, d_up1_out_, d_conv4_weights_,
+                                 d_grad_up1_out_, d_grad_conv4_weights_, d_grad_conv4_bias_,
+                                 batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1);
+    
+    // Upsample1 backward: (8, 8, 128) <- (16, 16, 128)
+    launch_upsample2d_backward_optimized(d_grad_up1_out_, d_grad_conv3_out_,
+                                        batch_size, LATENT_H, LATENT_W, LATENT_C, 2);
+    
+    // ReLU3 backward (optimized)
+    launch_relu_backward_optimized(d_grad_conv3_out_, d_conv3_out_, d_grad_conv3_out_,
+                                   batch_size * LATENT_H * LATENT_W * LATENT_C);
+    
+    // Conv3 backward: (8, 8, 128) <- (8, 8, 128)
+    launch_conv2d_shared_backward(d_grad_conv3_out_, d_pool2_out_, d_conv3_weights_,
+                                 d_grad_pool2_out_, d_grad_conv3_weights_, d_grad_conv3_bias_,
+                                 batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
+    
+    // Backward through encoder with OPTIMIZED kernels
+    // MaxPool2 backward: (16, 16, 128) <- (8, 8, 128)
+    launch_maxpool2d_backward_optimized(d_grad_pool2_out_, d_conv2_out_, d_pool2_out_,
+                                       d_grad_conv2_out_, batch_size, 16, 16, CONV2_FILTERS, 2, 2);
+    
+    // ReLU2 backward (optimized)
+    launch_relu_backward_optimized(d_grad_conv2_out_, d_conv2_out_, d_grad_conv2_out_,
+                                   batch_size * 16 * 16 * CONV2_FILTERS);
+    
+    // Conv2 backward: (16, 16, 256) <- (16, 16, 128)
+    launch_conv2d_shared_backward(d_grad_conv2_out_, d_pool1_out_, d_conv2_weights_,
+                                 d_grad_pool1_out_, d_grad_conv2_weights_, d_grad_conv2_bias_,
+                                 batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
+    
+    // MaxPool1 backward: (32, 32, 256) <- (16, 16, 256)
+    launch_maxpool2d_backward_optimized(d_grad_pool1_out_, d_conv1_out_, d_pool1_out_,
+                                       d_grad_conv1_out_, batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
+    
+    // ReLU1 backward (optimized)
+    launch_relu_backward_optimized(d_grad_conv1_out_, d_conv1_out_, d_grad_conv1_out_,
+                                   batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
+    
+    // Conv1 backward: (32, 32, 3) <- (32, 32, 256)
+    float* d_grad_input = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_grad_input, size * sizeof(float)));
+    launch_zero_grad(d_grad_input, size);
+    
+    launch_conv2d_shared_backward(d_grad_conv1_out_, d_input_, d_conv1_weights_,
+                                 d_grad_input, d_grad_conv1_weights_, d_grad_conv1_bias_,
+                                 batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
+    
+    cudaFree(d_grad_input);
+}
+
+void AutoencoderGPUOptimized::update_weights_gpu(float learning_rate, int batch_size) {
+    // Update all weights using SGD
+    launch_sgd_update(d_conv1_weights_, d_grad_conv1_weights_, learning_rate,
+                     CONV1_FILTERS * INPUT_C * 3 * 3);
+    launch_sgd_update(d_conv1_bias_, d_grad_conv1_bias_, learning_rate, CONV1_FILTERS);
+    
+    launch_sgd_update(d_conv2_weights_, d_grad_conv2_weights_, learning_rate,
+                     CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
+    launch_sgd_update(d_conv2_bias_, d_grad_conv2_bias_, learning_rate, CONV2_FILTERS);
+    
+    launch_sgd_update(d_conv3_weights_, d_grad_conv3_weights_, learning_rate,
+                     LATENT_C * LATENT_C * 3 * 3);
+    launch_sgd_update(d_conv3_bias_, d_grad_conv3_bias_, learning_rate, LATENT_C);
+    
+    launch_sgd_update(d_conv4_weights_, d_grad_conv4_weights_, learning_rate,
+                     CONV1_FILTERS * LATENT_C * 3 * 3);
+    launch_sgd_update(d_conv4_bias_, d_grad_conv4_bias_, learning_rate, CONV1_FILTERS);
+    
+    launch_sgd_update(d_conv5_weights_, d_grad_conv5_weights_, learning_rate,
+                     INPUT_C * CONV1_FILTERS * 3 * 3);
+    launch_sgd_update(d_conv5_bias_, d_grad_conv5_bias_, learning_rate, INPUT_C);
 }
 
 void AutoencoderGPUOptimized::train(const std::vector<float>& train_images,
@@ -264,6 +448,12 @@ void AutoencoderGPUOptimized::train(const std::vector<float>& train_images,
             // Compute loss
             float loss = compute_loss_gpu(actual_batch_size);
             epoch_loss += loss;
+            
+            // Backward pass (optimized)
+            backward_gpu_optimized(actual_batch_size);
+            
+            // Update weights
+            update_weights_gpu(learning_rate, actual_batch_size);
         }
         
         cudaEventRecord(epoch_stop);
