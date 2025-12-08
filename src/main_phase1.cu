@@ -18,11 +18,6 @@ int main(int argc, char** argv) {
     int batch_size = 32;
     int epochs = 1;  // Chỉ 1 epoch cho sanity check & benchmarking
     
-    // Số lượng ảnh train:
-    // - Mặc định: Toàn bộ 50,000 ảnh (để sanity check đầy đủ)
-    // - Test nhanh: Uncomment dòng dưới để chỉ dùng 300 ảnh
-    // int num_train_images = 300;  // <-- Uncomment để test nhanh
-    
     float learning_rate = 0.001f;
     
     // Load CIFAR-10 dataset

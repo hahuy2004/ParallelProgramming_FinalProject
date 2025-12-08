@@ -90,6 +90,17 @@ int main(int argc, char** argv) {
     std::cout << "Training images: " << loader.get_train_size() << std::endl;
     std::cout << "Test images: " << loader.get_test_size() << std::endl;
     
+    // Number of samples to use (CPU mode uses limited samples)
+    int num_train_samples = loader.get_train_size();
+    int num_test_samples = loader.get_test_size();
+    
+    if (mode == "cpu") {
+        num_train_samples = 500;  // CPU was trained with only 500 images
+        num_test_samples = 1000;  // Use 1000 test images for CPU mode
+        std::cout << "\nNOTE: CPU mode - using " << num_train_samples 
+                  << " training samples and " << num_test_samples << " test samples" << std::endl;
+    }
+    
     // Extract features
     std::cout << "\n=== Step 2: Loading Autoencoder and Extracting Features ===" << std::endl;
     std::vector<float> train_features;
@@ -105,12 +116,12 @@ int main(int argc, char** argv) {
         
         std::cout << "Extracting training features..." << std::endl;
         autoencoder.extract_features(loader.get_train_images(), 
-                                    loader.get_train_size(), 
+                                    num_train_samples, 
                                     train_features);
         
         std::cout << "Extracting test features..." << std::endl;
         autoencoder.extract_features(loader.get_test_images(),
-                                    loader.get_test_size(),
+                                    num_test_samples,
                                     test_features);
     } else if (mode == "naive") {
         std::cout << "Using Naive GPU Autoencoder" << std::endl;
@@ -120,12 +131,12 @@ int main(int argc, char** argv) {
         
         std::cout << "Extracting training features..." << std::endl;
         autoencoder.extract_features(loader.get_train_images(), 
-                                    loader.get_train_size(), 
+                                    num_train_samples, 
                                     train_features);
         
         std::cout << "Extracting test features..." << std::endl;
         autoencoder.extract_features(loader.get_test_images(),
-                                    loader.get_test_size(),
+                                    num_test_samples,
                                     test_features);
     } else {  // optimized
         std::cout << "Using Optimized GPU Autoencoder" << std::endl;
@@ -135,12 +146,12 @@ int main(int argc, char** argv) {
         
         std::cout << "Extracting training features..." << std::endl;
         autoencoder.extract_features(loader.get_train_images(), 
-                                    loader.get_train_size(), 
+                                    num_train_samples, 
                                     train_features);
         
         std::cout << "Extracting test features..." << std::endl;
         autoencoder.extract_features(loader.get_test_images(),
-                                    loader.get_test_size(),
+                                    num_test_samples,
                                     test_features);
     }
     
@@ -148,8 +159,8 @@ int main(int argc, char** argv) {
     float extract_time = std::chrono::duration<float>(extract_end - extract_start).count();
     
     std::cout << "Feature extraction completed in " << extract_time << " seconds" << std::endl;
-    std::cout << "Training features shape: (" << loader.get_train_size() << ", 8192)" << std::endl;
-    std::cout << "Test features shape: (" << loader.get_test_size() << ", 8192)" << std::endl;
+    std::cout << "Training features shape: (" << num_train_samples << ", 8192)" << std::endl;
+    std::cout << "Test features shape: (" << num_test_samples << ", 8192)" << std::endl;
     
     // Train SVM
     std::cout << "\n=== Step 3: Training SVM Classifier ===" << std::endl;
@@ -157,8 +168,17 @@ int main(int argc, char** argv) {
     
     auto svm_train_start = std::chrono::high_resolution_clock::now();
     
-    svm.train(train_features, loader.get_train_labels(),
-             loader.get_train_size(), 8192);
+    if (mode == "cpu") {
+        // CPU mode: use subset of labels
+        std::vector<uint8_t> train_labels_subset(
+            loader.get_train_labels().begin(),
+            loader.get_train_labels().begin() + num_train_samples
+        );
+        svm.train(train_features, train_labels_subset, num_train_samples, 8192);
+    } else {
+        // GPU modes: use full training labels
+        svm.train(train_features, loader.get_train_labels(), num_train_samples, 8192);
+    }
     
     auto svm_train_end = std::chrono::high_resolution_clock::now();
     float svm_train_time = std::chrono::duration<float>(svm_train_end - svm_train_start).count();
@@ -166,7 +186,10 @@ int main(int argc, char** argv) {
     std::cout << "SVM training completed in " << svm_train_time << " seconds" << std::endl;
     
     // Save SVM model
-    svm.save_model("weights/svm_model.model");
+    std::string svm_model_path = (mode == "cpu") ? "weights/svm_model_cpu.model" : 
+                                  (mode == "naive") ? "weights/svm_model_naive.model" :
+                                  "weights/svm_model_optimized.model";
+    svm.save_model(svm_model_path);
     
     // Predict on test set
     std::cout << "\n=== Step 4: Evaluating on Test Set ===" << std::endl;
@@ -174,7 +197,7 @@ int main(int argc, char** argv) {
     
     auto predict_start = std::chrono::high_resolution_clock::now();
     
-    svm.predict(test_features, loader.get_test_size(), 8192, predictions);
+    svm.predict(test_features, num_test_samples, 8192, predictions);
     
     auto predict_end = std::chrono::high_resolution_clock::now();
     float predict_time = std::chrono::duration<float>(predict_end - predict_start).count();
@@ -182,7 +205,21 @@ int main(int argc, char** argv) {
     std::cout << "Prediction completed in " << predict_time << " seconds" << std::endl;
     
     // Evaluate
-    float accuracy = svm.evaluate(predictions, loader.get_test_labels());
+    float accuracy;
+    std::vector<uint8_t> test_labels_for_eval;
+    
+    if (mode == "cpu") {
+        // CPU mode: use subset of test labels
+        test_labels_for_eval.assign(
+            loader.get_test_labels().begin(),
+            loader.get_test_labels().begin() + num_test_samples
+        );
+    } else {
+        // GPU modes: use full test labels
+        test_labels_for_eval = loader.get_test_labels();
+    }
+    
+    accuracy = svm.evaluate(predictions, test_labels_for_eval);
     
     std::cout << "\n========================================" << std::endl;
     std::cout << "=== Final Results ===" << std::endl;
@@ -191,7 +228,7 @@ int main(int argc, char** argv) {
     
     // Compute and display confusion matrix
     std::vector<std::vector<int>> confusion_matrix;
-    svm.compute_confusion_matrix(predictions, loader.get_test_labels(),
+    svm.compute_confusion_matrix(predictions, test_labels_for_eval,
                                  10, confusion_matrix);
     
     print_confusion_matrix(confusion_matrix, class_names);
