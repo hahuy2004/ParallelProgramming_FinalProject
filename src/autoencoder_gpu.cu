@@ -2,6 +2,7 @@
 #include "../cuda/gpu_kernels.h"
 #include <cuda_runtime.h>
 #include <iostream>
+#include <iomanip>
 #include <fstream>
 #include <chrono>
 #include <cstring>
@@ -228,6 +229,7 @@ void AutoencoderGPU::free_device_memory() {
     if (d_loss_) cudaFree(d_loss_);
 }
 
+// Newly added: GPU forward pass for complete encoder-decoder pipeline
 void AutoencoderGPU::forward_gpu(int batch_size) {
     // Encoder
     // Conv1 + ReLU: (32, 32, 3) -> (32, 32, 256)
@@ -272,6 +274,7 @@ void AutoencoderGPU::forward_gpu(int batch_size) {
                          batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
 }
 
+// Newly added: Compute MSE loss on GPU
 float AutoencoderGPU::compute_loss_gpu(int batch_size) {
     int size = batch_size * INPUT_H * INPUT_W * INPUT_C;
     launch_mse_loss(d_input_, d_conv5_out_, d_loss_, size);
@@ -281,10 +284,11 @@ float AutoencoderGPU::compute_loss_gpu(int batch_size) {
     return h_loss / size;
 }
 
+// Newly added: Complete GPU backward pass implementation
 void AutoencoderGPU::backward_gpu(int batch_size) {
     int size = batch_size * INPUT_H * INPUT_W * INPUT_C;
     
-    // Zero out all gradients
+    // Zero out all gradients for weights and biases
     launch_zero_grad(d_grad_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3);
     launch_zero_grad(d_grad_conv1_bias_, CONV1_FILTERS);
     launch_zero_grad(d_grad_conv2_weights_, CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
@@ -296,15 +300,24 @@ void AutoencoderGPU::backward_gpu(int batch_size) {
     launch_zero_grad(d_grad_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3);
     launch_zero_grad(d_grad_conv5_bias_, INPUT_C);
     
+    // Zero out activation gradients
+    launch_zero_grad(d_grad_conv5_out_, batch_size * INPUT_H * INPUT_W * INPUT_C);
     launch_zero_grad(d_grad_up2_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
+    launch_zero_grad(d_grad_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS);
+    launch_zero_grad(d_grad_up1_out_, batch_size * 16 * 16 * LATENT_C);
+    launch_zero_grad(d_grad_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
+    launch_zero_grad(d_grad_pool2_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
+    launch_zero_grad(d_grad_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS);
+    launch_zero_grad(d_grad_pool1_out_, batch_size * 16 * 16 * CONV1_FILTERS);
+    launch_zero_grad(d_grad_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
     
     // Compute gradient of loss w.r.t. output
     launch_mse_loss_backward(d_conv5_out_, d_input_, d_grad_conv5_out_, size);
     
     // Backward through decoder
     // Conv5 backward: (32, 32, 3) <- (32, 32, 256)
-    launch_conv2d_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_,
-                          d_grad_up2_out_, d_grad_conv5_weights_, d_grad_conv5_bias_,
+    launch_conv2d_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_, d_grad_up2_out_,
+                          d_grad_conv5_weights_, d_grad_conv5_bias_,
                           batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
     
     // Upsample2 backward: (16, 16, 256) <- (32, 32, 256)
@@ -316,8 +329,8 @@ void AutoencoderGPU::backward_gpu(int batch_size) {
                         batch_size * 16 * 16 * CONV1_FILTERS);
     
     // Conv4 backward: (16, 16, 128) <- (16, 16, 256)
-    launch_conv2d_backward(d_grad_conv4_out_, d_up1_out_, d_conv4_weights_,
-                          d_grad_up1_out_, d_grad_conv4_weights_, d_grad_conv4_bias_,
+    launch_conv2d_backward(d_grad_conv4_out_, d_up1_out_, d_conv4_weights_, d_grad_up1_out_,
+                          d_grad_conv4_weights_, d_grad_conv4_bias_,
                           batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1);
     
     // Upsample1 backward: (8, 8, 128) <- (16, 16, 128)
@@ -329,8 +342,8 @@ void AutoencoderGPU::backward_gpu(int batch_size) {
                         batch_size * LATENT_H * LATENT_W * LATENT_C);
     
     // Conv3 backward: (8, 8, 128) <- (8, 8, 128)
-    launch_conv2d_backward(d_grad_conv3_out_, d_pool2_out_, d_conv3_weights_,
-                          d_grad_pool2_out_, d_grad_conv3_weights_, d_grad_conv3_bias_,
+    launch_conv2d_backward(d_grad_conv3_out_, d_pool2_out_, d_conv3_weights_, d_grad_pool2_out_,
+                          d_grad_conv3_weights_, d_grad_conv3_bias_,
                           batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
     
     // Backward through encoder
@@ -343,8 +356,8 @@ void AutoencoderGPU::backward_gpu(int batch_size) {
                         batch_size * 16 * 16 * CONV2_FILTERS);
     
     // Conv2 backward: (16, 16, 256) <- (16, 16, 128)
-    launch_conv2d_backward(d_grad_conv2_out_, d_pool1_out_, d_conv2_weights_,
-                          d_grad_pool1_out_, d_grad_conv2_weights_, d_grad_conv2_bias_,
+    launch_conv2d_backward(d_grad_conv2_out_, d_pool1_out_, d_conv2_weights_, d_grad_pool1_out_,
+                          d_grad_conv2_weights_, d_grad_conv2_bias_,
                           batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
     
     // MaxPool1 backward: (32, 32, 256) <- (16, 16, 256)
@@ -361,13 +374,14 @@ void AutoencoderGPU::backward_gpu(int batch_size) {
     CUDA_CHECK(cudaMalloc(&d_grad_input, size * sizeof(float)));
     launch_zero_grad(d_grad_input, size);
     
-    launch_conv2d_backward(d_grad_conv1_out_, d_input_, d_conv1_weights_,
-                          d_grad_input, d_grad_conv1_weights_, d_grad_conv1_bias_,
+    launch_conv2d_backward(d_grad_conv1_out_, d_input_, d_conv1_weights_, d_grad_input,
+                          d_grad_conv1_weights_, d_grad_conv1_bias_,
                           batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
     
     cudaFree(d_grad_input);
 }
 
+// Newly added: Update all weights using SGD on GPU
 void AutoencoderGPU::update_weights_gpu(float learning_rate, int batch_size) {
     // Update all weights using SGD
     launch_sgd_update(d_conv1_weights_, d_grad_conv1_weights_, learning_rate,
@@ -391,18 +405,26 @@ void AutoencoderGPU::update_weights_gpu(float learning_rate, int batch_size) {
     launch_sgd_update(d_conv5_bias_, d_grad_conv5_bias_, learning_rate, INPUT_C);
 }
 
+// Newly added: Complete GPU training loop with backward pass
 void AutoencoderGPU::train(const std::vector<float>& train_images,
                             int num_images,
                             int batch_size,
                             int epochs,
                             float learning_rate) {
-    std::cout << "Training GPU Autoencoder (Naive)..." << std::endl;
-    std::cout << "Images: " << num_images << ", Batch size: " << batch_size 
-              << ", Epochs: " << epochs << ", LR: " << learning_rate << std::endl;
+    std::cout << "\n" << std::string(60, '=') << std::endl;
+    std::cout << "         TRAINING CONFIGURATION" << std::endl;
+    std::cout << std::string(60, '=') << std::endl;
+    std::cout << "  Total Images    : " << num_images << std::endl;
+    std::cout << "  Batch Size      : " << batch_size << std::endl;
+    std::cout << "  Epochs          : " << epochs << std::endl;
+    std::cout << "  Learning Rate   : " << learning_rate << std::endl;
     
     allocate_device_memory(batch_size);
     
     int num_batches = (num_images + batch_size - 1) / batch_size;
+    std::cout << "  Batches/Epoch   : " << num_batches << std::endl;
+    std::cout << "  Total Batches   : " << (num_batches * epochs) << std::endl;
+    std::cout << std::string(60, '=') << std::endl;
     
     // Create CUDA events for timing
     cudaEvent_t start, stop;
@@ -411,6 +433,8 @@ void AutoencoderGPU::train(const std::vector<float>& train_images,
     
     cudaEventRecord(start);
     
+    std::cout << "\nStarting training...\n" << std::endl;
+    
     for (int epoch = 0; epoch < epochs; ++epoch) {
         cudaEvent_t epoch_start, epoch_stop;
         cudaEventCreate(&epoch_start);
@@ -418,6 +442,10 @@ void AutoencoderGPU::train(const std::vector<float>& train_images,
         cudaEventRecord(epoch_start);
         
         float epoch_loss = 0.0f;
+        // For large datasets, log every batch; for small datasets, log ~10 times per epoch
+        int log_interval = (num_batches > 100) ? 1 : std::max(1, num_batches / 10);
+        
+        std::cout << "Epoch [" << (epoch + 1) << "/" << epochs << "]" << std::endl;
         
         for (int batch = 0; batch < num_batches; ++batch) {
             int start_idx = batch * batch_size;
@@ -447,6 +475,14 @@ void AutoencoderGPU::train(const std::vector<float>& train_images,
             
             // Update weights
             update_weights_gpu(learning_rate, actual_batch_size);
+            
+            // Log progress every N batches (host-side, no GPU sync needed)
+            if ((batch + 1) % log_interval == 0 || batch == num_batches - 1) {
+                float avg_loss = epoch_loss / (batch + 1);
+                float progress = 100.0f * (batch + 1) / num_batches;
+                std::cout << "  Batch [" << (batch + 1) << "/" << num_batches << "] "
+                          << "Avg Loss: " << std::setprecision(6) << avg_loss << std::endl;
+            }
         }
         
         cudaEventRecord(epoch_stop);
@@ -454,10 +490,18 @@ void AutoencoderGPU::train(const std::vector<float>& train_images,
         
         float epoch_time;
         cudaEventElapsedTime(&epoch_time, epoch_start, epoch_stop);
+        epoch_time /= 1000.0f;  // Convert to seconds
         
-        std::cout << "Epoch " << (epoch + 1) << "/" << epochs 
-                  << " - Loss: " << (epoch_loss / num_batches)
-                  << " - Time: " << (epoch_time / 1000.0f) << "s" << std::endl;
+        float avg_epoch_loss = epoch_loss / num_batches;
+        float imgs_per_sec = num_images / epoch_time;
+        
+        // Calculate ETA
+        float elapsed_epochs = epoch + 1;
+        float avg_time_per_epoch = epoch_time;  // Current epoch time
+        float remaining_epochs = epochs - elapsed_epochs;
+        float eta_seconds = remaining_epochs * avg_time_per_epoch;
+        int eta_minutes = (int)(eta_seconds / 60);
+        int eta_secs = (int)eta_seconds % 60;
         
         cudaEventDestroy(epoch_start);
         cudaEventDestroy(epoch_stop);
@@ -468,8 +512,24 @@ void AutoencoderGPU::train(const std::vector<float>& train_images,
     
     float total_time;
     cudaEventElapsedTime(&total_time, start, stop);
+    total_time /= 1000.0f;  // Convert to seconds
     
-    std::cout << "Training completed in " << (total_time / 1000.0f) << " seconds" << std::endl;
+    int total_minutes = (int)(total_time / 60);
+    int total_secs = (int)total_time % 60;
+    float avg_epoch_time = total_time / epochs;
+    float total_images_processed = (float)num_images * epochs;
+    float overall_throughput = total_images_processed / total_time;
+    
+    std::cout << "\n" << std::string(60, '=') << std::endl;
+    std::cout << "         TRAINING COMPLETED" << std::endl;
+    std::cout << std::string(60, '=') << std::endl;
+    std::cout << "  Total Time         : " << total_minutes << "m " << total_secs << "s (" 
+              << std::fixed << std::setprecision(2) << total_time << "s)" << std::endl;
+    std::cout << "  Avg Time/Epoch     : " << avg_epoch_time << "s" << std::endl;
+    std::cout << "  Overall Throughput : " << std::setprecision(1) << overall_throughput << " images/sec" << std::endl;
+    std::cout << "  Total Images       : " << (int)total_images_processed << " (" 
+              << num_images << " × " << epochs << " epochs)" << std::endl;
+    std::cout << std::string(60, '=') << "\n" << std::endl;
     
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
