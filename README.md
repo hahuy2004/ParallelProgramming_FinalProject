@@ -46,14 +46,16 @@ Project/
 │   ├── cifar10_loader.h
 │   ├── autoencoder_cpu.h
 │   ├── autoencoder_gpu.h
-│   ├── autoencoder_gpu_optimized.h
+│   ├── autoencoder_gpu_optimized_1.h
+│   ├── autoencoder_gpu_optimized_2.h
 │   └── svm_classifier.h
 │
 ├── src/                        # Source code
 │   ├── cifar10_loader.cpp
 │   ├── autoencoder_cpu.cpp
 │   ├── autoencoder_gpu.cu
-│   ├── autoencoder_gpu_optimized.cu
+│   ├── autoencoder_gpu_optimized_1.cu
+│   ├── autoencoder_gpu_optimized_2.cu
 │   ├── svm_classifier.cpp
 │   ├── main_phase1.cpp
 │   ├── main_phase2.cpp
@@ -63,8 +65,10 @@ Project/
 ├── cuda/                       # CUDA kernels
 │   ├── gpu_kernels.h
 │   ├── gpu_kernels.cu
-│   ├── gpu_kernels_optimized.h
-│   └── gpu_kernels_optimized.cu
+│   ├── gpu_kernels_optimized_1.h
+│   └── gpu_kernels_optimized_1.cu
+│   ├── gpu_kernels_optimized_2.h
+│   └── gpu_kernels_optimized_2.cu
 │
 ├── Makefile                    # Build system
 ├── CMakeLists.txt             # Alternative build (CMake)
@@ -78,7 +82,8 @@ Project/
 ├── weights/                    # Model weights (generated)
 │   ├── autoencoder_cpu.weights
 │   ├── autoencoder_gpu.weights
-│   └── autoencoder_gpu_optimized.weights
+│   └── autoencoder_gpu_optimized_1.weights
+│   └── autoencoder_gpu_optimized_2.weights
 │
 └── third_party/               # External libraries
     └── libsvm/                # SVM library
