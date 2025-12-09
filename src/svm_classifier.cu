@@ -1,5 +1,5 @@
 #include "../include/svm_classifier.h"
-#include "../third_party/libsvm/svm.h"
+#include "../third_lib/libsvm/svm.h"
 #include <iostream>
 #include <algorithm>
 #include <cstdint>
