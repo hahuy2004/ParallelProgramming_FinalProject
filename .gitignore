@@ -73,6 +73,6 @@ docs/_build/
 *.backup
 
 # Add embedded Git repository to ignore
-third_party/libsvm/.git/
-third_party/libsvm/.github/
-third_party/libsvm/
+third_lib/libsvm/.git/
+third_lib/libsvm/.github/
+third_lib/libsvm
