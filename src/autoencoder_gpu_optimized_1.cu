@@ -18,7 +18,7 @@
         } \
     } while(0)
 
-AutoencoderGPUOptimized1::AutoencoderGPUOptimized() : current_batch_size_(0) {
+AutoencoderGPUOptimized1::AutoencoderGPUOptimized1() : current_batch_size_(0) {
     // Initialize all device pointers to nullptr
     h_pinned_input_ = nullptr;
     h_pinned_output_ = nullptr;
@@ -71,7 +71,7 @@ AutoencoderGPUOptimized1::AutoencoderGPUOptimized() : current_batch_size_(0) {
     initialize_weights();
 }
 
-AutoencoderGPUOptimized1::~AutoencoderGPUOptimized() {
+AutoencoderGPUOptimized1::~AutoencoderGPUOptimized1() {
     free_device_memory();
     
     if (h_pinned_input_) cudaFreeHost(h_pinned_input_);
@@ -364,16 +364,6 @@ void AutoencoderGPUOptimized1::backward_gpu_optimized(int batch_size) {
     // ReLU1 backward
     launch_relu_backward(d_grad_conv1_out_, d_conv1_out_, d_grad_conv1_out_,
                         batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-    
-    // Conv1 backward: (32, 32, 3) <- (32, 32, 256)
-    // Note: We don't need gradient w.r.t. input, but we compute it anyway for completeness
-    float* d_grad_input = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_grad_input, size * sizeof(float)));
-    launch_zero_grad(d_grad_input, size);
-    
-    launch_conv2d_backward(d_grad_conv1_out_, d_input_, d_conv1_weights_,
-                          d_grad_input, d_grad_conv1_weights_, d_grad_conv1_bias_,
-                          batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
     
     // Conv1 backward: (32, 32, 3) <- (32, 32, 256)
     float* d_grad_input = nullptr;

@@ -57,7 +57,7 @@ $(BUILD_DIR)/phase2: $(SRC_DIR)/main_phase2.cu $(COMMON_OBJS) $(GPU_OBJS)
 # Phase 3: Optimized GPU
 phase3: $(BUILD_DIR)/phase3
 
-$(BUILD_DIR)/phase3: $(SRC_DIR)/main_phase3.cu $(COMMON_OBJS) $(BUILD_DIR)/autoencoder_gpu_optimized.o $(BUILD_DIR)/gpu_kernels.o $(BUILD_DIR)/gpu_kernels_optimized.o
+$(BUILD_DIR)/phase3: $(SRC_DIR)/main_phase3.cu $(COMMON_OBJS) $(BUILD_DIR)/autoencoder_gpu_optimized_1.o $(BUILD_DIR)/autoencoder_gpu_optimized_2.o $(BUILD_DIR)/gpu_kernels.o $(BUILD_DIR)/gpu_kernels_optimized_1.o $(BUILD_DIR)/gpu_kernels_optimized_2.o
 	$(NVCC) $(NVCCFLAGS) $(CUDA_ARCH) -o $@ $^ $(CUDA_LIBS)
 
 # Phase 4: Full Pipeline
@@ -79,10 +79,16 @@ $(BUILD_DIR)/autoencoder_gpu.o: $(SRC_DIR)/autoencoder_gpu.cu
 $(BUILD_DIR)/gpu_kernels.o: $(CUDA_DIR)/gpu_kernels.cu
 	$(NVCC) $(NVCCFLAGS) $(CUDA_ARCH) -c -o $@ $<
 
-$(BUILD_DIR)/autoencoder_gpu_optimized.o: $(SRC_DIR)/autoencoder_gpu_optimized.cu
+$(BUILD_DIR)/autoencoder_gpu_optimized_1.o: $(SRC_DIR)/autoencoder_gpu_optimized_1.cu
 	$(NVCC) $(NVCCFLAGS) $(CUDA_ARCH) -c -o $@ $<
 
-$(BUILD_DIR)/gpu_kernels_optimized.o: $(CUDA_DIR)/gpu_kernels_optimized.cu
+$(BUILD_DIR)/gpu_kernels_optimized_1.o: $(CUDA_DIR)/gpu_kernels_optimized_1.cu
+	$(NVCC) $(NVCCFLAGS) $(CUDA_ARCH) -c -o $@ $<
+
+$(BUILD_DIR)/autoencoder_gpu_optimized_2.o: $(SRC_DIR)/autoencoder_gpu_optimized_2.cu
+	$(NVCC) $(NVCCFLAGS) $(CUDA_ARCH) -c -o $@ $<
+
+$(BUILD_DIR)/gpu_kernels_optimized_2.o: $(CUDA_DIR)/gpu_kernels_optimized_2.cu
 	$(NVCC) $(NVCCFLAGS) $(CUDA_ARCH) -c -o $@ $<
 
 $(BUILD_DIR)/svm_classifier.o: $(SRC_DIR)/svm_classifier.cu

@@ -100,7 +100,6 @@ __global__ void conv2d_shared_backward_kernel(const float* grad_output, const fl
                                               float* grad_weights, float* grad_bias,
                                               int batch, int in_h, int in_w, int in_c,
                                               int out_c, int kernel_size, int stride, int padding) {
-    __shared__ float tile_grad[TILE_SIZE][TILE_SIZE][8];
     __shared__ float tile_input[TILE_SIZE + 2][TILE_SIZE + 2][8];
     
     int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;

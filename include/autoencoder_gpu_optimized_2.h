@@ -6,8 +6,8 @@
 
 class AutoencoderGPUOptimized2 {
 public:
-    AutoencoderGPUOptimized();
-    ~AutoencoderGPUOptimized();
+    AutoencoderGPUOptimized2();
+    ~AutoencoderGPUOptimized2();
 
     // Training
     void train(const std::vector<float>& train_images, 

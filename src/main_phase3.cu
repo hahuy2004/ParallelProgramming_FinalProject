@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
 
     // Save weights
     std::string weights_path_1 = "weights/autoencoder_gpu_optimized_1.weights";
-    autoencoder.save_weights(weights_path_1);
+    autoencoder_ver_1.save_weights(weights_path_1);
     
     // Extract features
     std::cout << "\n=== Extracting Features Version 1 ===" << std::endl;
@@ -84,8 +84,8 @@ int main(int argc, char** argv) {
     
     auto extract_start_1 = std::chrono::high_resolution_clock::now();
     
-    autoencoder.extract_features(train_images, loader.get_train_size(), train_features_1);
-    autoencoder.extract_features(loader.get_test_images(), loader.get_test_size(), test_features_1);
+    autoencoder_ver_1.extract_features(train_images, loader.get_train_size(), train_features_1);
+    autoencoder_ver_1.extract_features(loader.get_test_images(), loader.get_test_size(), test_features_1);
     
     auto extract_end_1 = std::chrono::high_resolution_clock::now();
     float extract_time_1 = std::chrono::duration<float>(extract_end_1 - extract_start_1).count();
@@ -111,8 +111,8 @@ int main(int argc, char** argv) {
     
     auto extract_start = std::chrono::high_resolution_clock::now();
     
-    autoencoder.extract_features(train_images, loader.get_train_size(), train_features_2);
-    autoencoder.extract_features(loader.get_test_images(), loader.get_test_size(), test_features_2);
+    autoencoder_ver_2.extract_features(train_images, loader.get_train_size(), train_features_2);
+    autoencoder_ver_2.extract_features(loader.get_test_images(), loader.get_test_size(), test_features_2);
     
     auto extract_end_2 = std::chrono::high_resolution_clock::now();
     float extract_time_2 = std::chrono::duration<float>(extract_end_2 - extract_start_2).count();

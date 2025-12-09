@@ -175,6 +175,11 @@ void AutoencoderCPU::upsample2d_forward(const float* input, float* output,
     }
 }
 
+//    conv2d_backward(grad_conv5_out_.data(), grad_up2_out_.data(),
+                    // grad_conv5_weights_.data(), grad_conv5_bias_.data(),
+                    // up2_out_.data(), conv5_weights_.data(),
+                    // batch_size, INPUT_H, INPUT_W, CONV1_FILTERS,
+                    // INPUT_C, 3, 1, 1);
 void AutoencoderCPU::conv2d_backward(const float* grad_output, float* grad_input,
                                       float* grad_weights, float* grad_bias,
                                       const float* input, const float* weights,
