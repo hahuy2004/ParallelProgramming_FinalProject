@@ -102,7 +102,7 @@ int main(int argc, char** argv) {
 
     // Save weights
     std::string weights_path_2 = "weights/autoencoder_gpu_optimized_2.weights";
-    autoencoder.save_weights(weights_path_2);
+    autoencoder_ver_2.save_weights(weights_path_2);
     
     // Extract features
     std::cout << "\n=== Extracting Features Version 2 ===" << std::endl;
