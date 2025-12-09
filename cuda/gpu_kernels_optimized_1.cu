@@ -1,5 +1,5 @@
 // Tập trung vào tối ưu memory cho các kernel
-#include "gpu_kernels_optimized.h"
+#include "gpu_kernels_optimized_1.h"
 #include "gpu_kernels.h"
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>

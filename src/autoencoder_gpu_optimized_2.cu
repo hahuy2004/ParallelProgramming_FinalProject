@@ -1,6 +1,6 @@
-#include "../include/autoencoder_gpu_optimized.h"
+#include "../include/autoencoder_gpu_optimized_2.h"
 #include "../cuda/gpu_kernels.h"
-#include "../cuda/gpu_kernels_optimized.h"
+#include "../cuda/gpu_kernels_optimized_2.h"
 #include <cuda_runtime.h>
 #include <iostream>
 #include <fstream>
@@ -18,7 +18,7 @@
         } \
     } while(0)
 
-AutoencoderGPUOptimized::AutoencoderGPUOptimized() : current_batch_size_(0) {
+AutoencoderGPUOptimized2::AutoencoderGPUOptimized() : current_batch_size_(0) {
     // Initialize all device pointers to nullptr
     h_pinned_input_ = nullptr;
     h_pinned_output_ = nullptr;
@@ -71,17 +71,18 @@ AutoencoderGPUOptimized::AutoencoderGPUOptimized() : current_batch_size_(0) {
     initialize_weights();
 }
 
-AutoencoderGPUOptimized::~AutoencoderGPUOptimized() {
+AutoencoderGPUOptimized2::~AutoencoderGPUOptimized() {
     free_device_memory();
     
     if (h_pinned_input_) cudaFreeHost(h_pinned_input_);
     if (h_pinned_output_) cudaFreeHost(h_pinned_output_);
 }
 
-void AutoencoderGPUOptimized::initialize_weights() {
+void AutoencoderGPUOptimized2::initialize_weights() {
     std::random_device rd;
     std::mt19937 gen(rd());
     
+    // He initilization
     auto init_and_upload = [&](float** d_ptr, int size, int fan_in) {
         std::vector<float> h_weights(size);
         float std = std::sqrt(2.0f / fan_in);
@@ -130,7 +131,7 @@ void AutoencoderGPUOptimized::initialize_weights() {
     std::cout << "GPU Optimized weights initialized" << std::endl;
 }
 
-void AutoencoderGPUOptimized::allocate_device_memory(int batch_size) {
+void AutoencoderGPUOptimized2::allocate_device_memory(int batch_size) {
     if (batch_size == current_batch_size_) return;
     
     // Free old memory
@@ -190,7 +191,7 @@ void AutoencoderGPUOptimized::allocate_device_memory(int batch_size) {
     CUDA_CHECK(cudaMallocHost(&h_pinned_output_, batch_size * LATENT_DIM * sizeof(float)));
 }
 
-void AutoencoderGPUOptimized::free_device_memory() {
+void AutoencoderGPUOptimized2::free_device_memory() {
     if (d_conv1_weights_) cudaFree(d_conv1_weights_);
     if (d_conv1_bias_) cudaFree(d_conv1_bias_);
     if (d_conv2_weights_) cudaFree(d_conv2_weights_);
@@ -237,7 +238,7 @@ void AutoencoderGPUOptimized::free_device_memory() {
     if (d_loss_) cudaFree(d_loss_);
 }
 
-void AutoencoderGPUOptimized::forward_gpu_optimized(int batch_size) {
+void AutoencoderGPUOptimized2::forward_gpu_optimized(int batch_size) {
     // Encoder with FUSED operations
     // Conv1 + ReLU (fused): (32, 32, 3) -> (32, 32, 256)
     launch_conv2d_relu_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
@@ -277,7 +278,7 @@ void AutoencoderGPUOptimized::forward_gpu_optimized(int batch_size) {
                          batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
 }
 
-float AutoencoderGPUOptimized::compute_loss_gpu(int batch_size) {
+float AutoencoderGPUOptimized2::compute_loss_gpu(int batch_size) {
     int size = batch_size * INPUT_H * INPUT_W * INPUT_C;
     launch_mse_loss(d_input_, d_conv5_out_, d_loss_, size);
     
@@ -286,7 +287,7 @@ float AutoencoderGPUOptimized::compute_loss_gpu(int batch_size) {
     return h_loss / size;
 }
 
-void AutoencoderGPUOptimized::backward_gpu_optimized(int batch_size) {
+void AutoencoderGPUOptimized2::backward_gpu_optimized(int batch_size) {
     int size = batch_size * INPUT_H * INPUT_W * INPUT_C;
     
     // Zero out all gradients
@@ -308,10 +309,10 @@ void AutoencoderGPUOptimized::backward_gpu_optimized(int batch_size) {
     
     // Backward through decoder with OPTIMIZED kernels
     // Conv5 backward: (32, 32, 3) <- (32, 32, 256)
-    launch_conv2d_shared_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_,
-                                 d_grad_up2_out_, d_grad_conv5_weights_, d_grad_conv5_bias_,
-                                 batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
-    
+    launch_conv2d_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_,
+                            d_grad_up2_out_, d_grad_conv5_weights_, d_grad_conv5_bias_,
+                            batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
+
     // Upsample2 backward: (16, 16, 256) <- (32, 32, 256)
     launch_upsample2d_backward_optimized(d_grad_up2_out_, d_grad_conv4_out_,
                                         batch_size, 16, 16, CONV1_FILTERS, 2);
@@ -334,9 +335,9 @@ void AutoencoderGPUOptimized::backward_gpu_optimized(int batch_size) {
                                    batch_size * LATENT_H * LATENT_W * LATENT_C);
     
     // Conv3 backward: (8, 8, 128) <- (8, 8, 128)
-    launch_conv2d_shared_backward(d_grad_conv3_out_, d_pool2_out_, d_conv3_weights_,
-                                 d_grad_pool2_out_, d_grad_conv3_weights_, d_grad_conv3_bias_,
-                                 batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
+    launch_conv2d_backward(d_grad_conv3_out_, d_pool2_out_, d_conv3_weights_,
+                            d_grad_pool2_out_, d_grad_conv3_weights_, d_grad_conv3_bias_,
+                            batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
     
     // Backward through encoder with OPTIMIZED kernels
     // MaxPool2 backward: (16, 16, 128) <- (8, 8, 128)
@@ -348,9 +349,9 @@ void AutoencoderGPUOptimized::backward_gpu_optimized(int batch_size) {
                                    batch_size * 16 * 16 * CONV2_FILTERS);
     
     // Conv2 backward: (16, 16, 256) <- (16, 16, 128)
-    launch_conv2d_shared_backward(d_grad_conv2_out_, d_pool1_out_, d_conv2_weights_,
-                                 d_grad_pool1_out_, d_grad_conv2_weights_, d_grad_conv2_bias_,
-                                 batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
+    launch_conv2d_backward(d_grad_conv2_out_, d_pool1_out_, d_conv2_weights_,
+                            d_grad_pool1_out_, d_grad_conv2_weights_, d_grad_conv2_bias_,
+                            batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
     
     // MaxPool1 backward: (32, 32, 256) <- (16, 16, 256)
     launch_maxpool2d_backward_optimized(d_grad_pool1_out_, d_conv1_out_, d_pool1_out_,
@@ -365,14 +366,14 @@ void AutoencoderGPUOptimized::backward_gpu_optimized(int batch_size) {
     CUDA_CHECK(cudaMalloc(&d_grad_input, size * sizeof(float)));
     launch_zero_grad(d_grad_input, size);
     
-    launch_conv2d_shared_backward(d_grad_conv1_out_, d_input_, d_conv1_weights_,
-                                 d_grad_input, d_grad_conv1_weights_, d_grad_conv1_bias_,
-                                 batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
-    
+    launch_conv2d_backward(d_grad_conv1_out_, d_input_, d_conv1_weights_,
+                            d_grad_input, d_grad_conv1_weights_, d_grad_conv1_bias_,
+                            batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
+
     cudaFree(d_grad_input);
 }
 
-void AutoencoderGPUOptimized::update_weights_gpu(float learning_rate, int batch_size) {
+void AutoencoderGPUOptimized2::update_weights_gpu(float learning_rate, int batch_size) {
     // Update all weights using SGD
     launch_sgd_update(d_conv1_weights_, d_grad_conv1_weights_, learning_rate,
                      CONV1_FILTERS * INPUT_C * 3 * 3);
@@ -395,7 +396,7 @@ void AutoencoderGPUOptimized::update_weights_gpu(float learning_rate, int batch_
     launch_sgd_update(d_conv5_bias_, d_grad_conv5_bias_, learning_rate, INPUT_C);
 }
 
-void AutoencoderGPUOptimized::train(const std::vector<float>& train_images,
+void AutoencoderGPUOptimized2::train(const std::vector<float>& train_images,
                                      int num_images,
                                      int batch_size,
                                      int epochs,
@@ -482,7 +483,7 @@ void AutoencoderGPUOptimized::train(const std::vector<float>& train_images,
     cudaEventDestroy(stop);
 }
 
-void AutoencoderGPUOptimized::extract_features(const std::vector<float>& images,
+void AutoencoderGPUOptimized2::extract_features(const std::vector<float>& images,
                                                 int num_images,
                                                 std::vector<float>& features) {
     features.resize(num_images * LATENT_DIM);
@@ -542,7 +543,7 @@ void AutoencoderGPUOptimized::extract_features(const std::vector<float>& images,
     std::cout << "Optimized feature extraction completed in " << time << " seconds" << std::endl;
 }
 
-void AutoencoderGPUOptimized::save_weights(const std::string& filepath) {
+void AutoencoderGPUOptimized2::save_weights(const std::string& filepath) {
     std::ofstream file(filepath, std::ios::binary);
     if (!file.is_open()) {
         std::cerr << "Failed to open file for saving: " << filepath << std::endl;
@@ -571,7 +572,7 @@ void AutoencoderGPUOptimized::save_weights(const std::string& filepath) {
     std::cout << "Optimized weights saved to " << filepath << std::endl;
 }
 
-void AutoencoderGPUOptimized::load_weights(const std::string& filepath) {
+void AutoencoderGPUOptimized2::load_weights(const std::string& filepath) {
     std::ifstream file(filepath, std::ios::binary);
     if (!file.is_open()) {
         std::cerr << "Failed to open file for loading: " << filepath << std::endl;
@@ -605,6 +606,6 @@ void AutoencoderGPUOptimized::load_weights(const std::string& filepath) {
     std::cout << "Optimized weights loaded from " << filepath << std::endl;
 }
 
-void AutoencoderGPUOptimized::copy_weights_from_cpu(const std::string& cpu_weights_path) {
+void AutoencoderGPUOptimized2::copy_weights_from_cpu(const std::string& cpu_weights_path) {
     load_weights(cpu_weights_path);
 }

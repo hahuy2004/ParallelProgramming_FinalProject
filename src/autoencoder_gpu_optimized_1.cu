@@ -1,4 +1,4 @@
-#include "../include/autoencoder_gpu_optimized.h"
+#include "../include/autoencoder_gpu_optimized_1.h"
 #include "../cuda/gpu_kernels.h"
 #include "../cuda/gpu_kernels_optimized_1.h"
 #include <cuda_runtime.h>
@@ -18,7 +18,7 @@
         } \
     } while(0)
 
-AutoencoderGPUOptimized::AutoencoderGPUOptimized() : current_batch_size_(0) {
+AutoencoderGPUOptimized1::AutoencoderGPUOptimized() : current_batch_size_(0) {
     // Initialize all device pointers to nullptr
     h_pinned_input_ = nullptr;
     h_pinned_output_ = nullptr;
@@ -71,14 +71,14 @@ AutoencoderGPUOptimized::AutoencoderGPUOptimized() : current_batch_size_(0) {
     initialize_weights();
 }
 
-AutoencoderGPUOptimized::~AutoencoderGPUOptimized() {
+AutoencoderGPUOptimized1::~AutoencoderGPUOptimized() {
     free_device_memory();
     
     if (h_pinned_input_) cudaFreeHost(h_pinned_input_);
     if (h_pinned_output_) cudaFreeHost(h_pinned_output_);
 }
 
-void AutoencoderGPUOptimized::initialize_weights() {
+void AutoencoderGPUOptimized1::initialize_weights() {
     std::random_device rd;
     std::mt19937 gen(rd());
     
@@ -131,7 +131,7 @@ void AutoencoderGPUOptimized::initialize_weights() {
     std::cout << "GPU Optimized weights initialized" << std::endl;
 }
 
-void AutoencoderGPUOptimized::allocate_device_memory(int batch_size) {
+void AutoencoderGPUOptimized1::allocate_device_memory(int batch_size) {
     if (batch_size == current_batch_size_) return;
     
     // Free old memory
@@ -191,7 +191,7 @@ void AutoencoderGPUOptimized::allocate_device_memory(int batch_size) {
     CUDA_CHECK(cudaMallocHost(&h_pinned_output_, batch_size * LATENT_DIM * sizeof(float)));
 }
 
-void AutoencoderGPUOptimized::free_device_memory() {
+void AutoencoderGPUOptimized1::free_device_memory() {
     if (d_conv1_weights_) cudaFree(d_conv1_weights_);
     if (d_conv1_bias_) cudaFree(d_conv1_bias_);
     if (d_conv2_weights_) cudaFree(d_conv2_weights_);
@@ -238,7 +238,7 @@ void AutoencoderGPUOptimized::free_device_memory() {
     if (d_loss_) cudaFree(d_loss_);
 }
 
-void AutoencoderGPUOptimized::forward_gpu_optimized(int batch_size) {
+void AutoencoderGPUOptimized1::forward_gpu_optimized(int batch_size) {
     // Sử dụng shared memory
     launch_conv2d_shared_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
                                batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
@@ -282,7 +282,7 @@ void AutoencoderGPUOptimized::forward_gpu_optimized(int batch_size) {
                          batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
 }
 
-float AutoencoderGPUOptimized::compute_loss_gpu(int batch_size) {
+float AutoencoderGPUOptimized1::compute_loss_gpu(int batch_size) {
     int size = batch_size * INPUT_H * INPUT_W * INPUT_C;
     launch_mse_loss(d_input_, d_conv5_out_, d_loss_, size);
     
@@ -291,7 +291,7 @@ float AutoencoderGPUOptimized::compute_loss_gpu(int batch_size) {
     return h_loss / size;
 }
 
-void AutoencoderGPUOptimized::backward_gpu_optimized(int batch_size) {
+void AutoencoderGPUOptimized1::backward_gpu_optimized(int batch_size) {
     int size = batch_size * INPUT_H * INPUT_W * INPUT_C;
     
     // Zero out all gradients
@@ -387,7 +387,7 @@ void AutoencoderGPUOptimized::backward_gpu_optimized(int batch_size) {
     cudaFree(d_grad_input);
 }
 
-void AutoencoderGPUOptimized::update_weights_gpu(float learning_rate, int batch_size) {
+void AutoencoderGPUOptimized1::update_weights_gpu(float learning_rate, int batch_size) {
     // Update all weights using SGD
     launch_sgd_update(d_conv1_weights_, d_grad_conv1_weights_, learning_rate,
                      CONV1_FILTERS * INPUT_C * 3 * 3);
@@ -410,7 +410,7 @@ void AutoencoderGPUOptimized::update_weights_gpu(float learning_rate, int batch_
     launch_sgd_update(d_conv5_bias_, d_grad_conv5_bias_, learning_rate, INPUT_C);
 }
 
-void AutoencoderGPUOptimized::train(const std::vector<float>& train_images,
+void AutoencoderGPUOptimized1::train(const std::vector<float>& train_images,
                                      int num_images,
                                      int batch_size,
                                      int epochs,
@@ -497,7 +497,7 @@ void AutoencoderGPUOptimized::train(const std::vector<float>& train_images,
     cudaEventDestroy(stop);
 }
 
-void AutoencoderGPUOptimized::extract_features(const std::vector<float>& images,
+void AutoencoderGPUOptimized1::extract_features(const std::vector<float>& images,
                                                 int num_images,
                                                 std::vector<float>& features) {
     features.resize(num_images * LATENT_DIM);
@@ -557,7 +557,7 @@ void AutoencoderGPUOptimized::extract_features(const std::vector<float>& images,
     std::cout << "Optimized feature extraction completed in " << time << " seconds" << std::endl;
 }
 
-void AutoencoderGPUOptimized::save_weights(const std::string& filepath) {
+void AutoencoderGPUOptimized1::save_weights(const std::string& filepath) {
     std::ofstream file(filepath, std::ios::binary);
     if (!file.is_open()) {
         std::cerr << "Failed to open file for saving: " << filepath << std::endl;
@@ -586,7 +586,7 @@ void AutoencoderGPUOptimized::save_weights(const std::string& filepath) {
     std::cout << "Optimized weights saved to " << filepath << std::endl;
 }
 
-void AutoencoderGPUOptimized::load_weights(const std::string& filepath) {
+void AutoencoderGPUOptimized1::load_weights(const std::string& filepath) {
     std::ifstream file(filepath, std::ios::binary);
     if (!file.is_open()) {
         std::cerr << "Failed to open file for loading: " << filepath << std::endl;
@@ -620,6 +620,6 @@ void AutoencoderGPUOptimized::load_weights(const std::string& filepath) {
     std::cout << "Optimized weights loaded from " << filepath << std::endl;
 }
 
-void AutoencoderGPUOptimized::copy_weights_from_cpu(const std::string& cpu_weights_path) {
+void AutoencoderGPUOptimized1::copy_weights_from_cpu(const std::string& cpu_weights_path) {
     load_weights(cpu_weights_path);
 }

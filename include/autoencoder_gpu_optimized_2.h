@@ -1,10 +1,10 @@
-#ifndef AUTOENCODER_GPU_OPTIMIZED_H
-#define AUTOENCODER_GPU_OPTIMIZED_H
+#ifndef AUTOENCODER_GPU_OPTIMIZED_2_H
+#define AUTOENCODER_GPU_OPTIMIZED_2_H
 
 #include <vector>
 #include <string>
 
-class AutoencoderGPUOptimized {
+class AutoencoderGPUOptimized2 {
 public:
     AutoencoderGPUOptimized();
     ~AutoencoderGPUOptimized();
@@ -101,4 +101,4 @@ private:
     float compute_loss_gpu(int batch_size);
 };
 
-#endif // AUTOENCODER_GPU_OPTIMIZED_H
+#endif // AUTOENCODER_GPU_OPTIMIZED_2_H
