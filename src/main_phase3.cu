@@ -1,5 +1,5 @@
 #include "../include/cifar10_loader.h"
-#include "../include/autoencoder_gpu_optimized.h"
+#include "../include/autoencoder_gpu_optimized_1.h"
 #include <iostream>
 #include <chrono>
 
@@ -34,8 +34,8 @@ int main(int argc, char** argv) {
     std::cout << "Test images: " << loader.get_test_size() << std::endl;
     
     // Create and train optimized GPU autoencoder
-    std::cout << "\n=== Training GPU Autoencoder (Optimized) ===" << std::endl;
-    std::cout << "NOTE: GPU Optimized Phase - Full training with " << loader.get_train_size() 
+    std::cout << "\n=== Training GPU Autoencoder (Memory Optimization) ===" << std::endl;
+    std::cout << "Full training with " << loader.get_train_size() 
               << " images, " << epochs << " epochs" << std::endl;
     std::cout << "Optimizations applied:" << std::endl;
     std::cout << "  - Kernel fusion (Conv + ReLU)" << std::endl;
@@ -61,11 +61,11 @@ int main(int argc, char** argv) {
     std::cout << "Time per epoch: " << (train_time / epochs) << " seconds" << std::endl;
     
     // Save weights
-    std::string weights_path = "weights/autoencoder_gpu_optimized.weights";
+    std::string weights_path = "weights/autoencoder_gpu_optimized_1.weights";
     autoencoder.save_weights(weights_path);
     
     // Extract features
-    std::cout << "\n=== Extracting Features (Optimized) ===" << std::endl;
+    std::cout << "\n=== Extracting Features ===" << std::endl;
     std::vector<float> train_features;
     std::vector<float> test_features;
     
@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
     
     std::cout << "\n=== Phase 3 Completed ===" << std::endl;
     std::cout << "Weights saved to: " << weights_path << std::endl;
-    std::cout << "\nOptimization Results:" << std::endl;
+    std::cout << "\nMemory Optimization Results:" << std::endl;
     std::cout << "  Training: " << train_time << "s (Target: <600s)" << std::endl;
     std::cout << "  Feature extraction: " << extract_time << "s (Target: <20s)" << std::endl;
     
