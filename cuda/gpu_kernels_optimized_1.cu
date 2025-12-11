@@ -15,7 +15,6 @@
         } \
     } while(0)
 
-#define TILE_SIZE 16
 
 // Sử dụng shared memory cho convolution ở giai đoạn forward
 __global__ void conv2d_forward_shared(const float* input, float* output,
@@ -92,15 +91,17 @@ void launch_conv2d_shared_forward(const float* d_input, float* d_output,
                                    int batch, int in_h, int in_w, int in_c,
                                    int out_c, int kernel_size, int stride, int padding) {
     // Mặc định block size
+    int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
+    int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
     dim3 block(16, 16);
     
     // Tính toán grid size
-    int grid_x = ((out_w + blockDim.x - 1) / blockDim.x) * ((out_h + blockDim.y - 1) / blockDim.y);
+    int grid_x = ((out_w + 16 - 1) / 16) * ((out_h + 16 - 1) / 16);
     dim3 grid(grid_x, out_c, batch); 
     
     // Tính kích thước shared memory
-    int tile_h = blockDim.x + kernel_size - 1;
-    int tile_w = blockDim.y + kernel_size - 1;
+    int tile_h = 16 + kernel_size - 1;
+    int tile_w = 16 + kernel_size - 1;
     int shmem_bytes = tile_h * tile_w * in_c * sizeof(float);
 
     conv2d_forward_shared<<<grid, block, shmem_bytes>>>(
@@ -224,13 +225,15 @@ void launch_conv2d_shared_backward(const float* d_grad_output, const float* d_in
                                    float* d_grad_weights, float* d_grad_bias,
                                    int batch, int in_h, int in_w, int in_c,
                                    int out_c, int kernel_size, int stride, int padding) {
+    int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
+    int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
     dim3 block(16, 16);
 
-    int grid_x = ((out_w + blockDim.x - 1) / blockDim.x) * ((out_h + blockDim.y - 1) / blockDim.y);
+    int grid_x = ((out_w + 16 - 1) / 16) * ((out_h + 16 - 1) / 16);
     dim3 grid(grid_x, out_c, batch);
     
-    int tile_h = blockDim.x + kernel_size - 1;
-    int tile_w = blockDim.y + kernel_size - 1;
+    int tile_h = 16 + kernel_size - 1;
+    int tile_w = 16 + kernel_size - 1;
     int shmem_bytes = tile_h * tile_w * in_c * sizeof(float);
 
     conv2d_shared_backward<<<grid, block, shmem_bytes>>>(

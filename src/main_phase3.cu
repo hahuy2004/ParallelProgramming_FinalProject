@@ -102,14 +102,14 @@ int main(int argc, char** argv) {
 
     // Save weights
     std::string weights_path_2 = "weights/autoencoder_gpu_optimized_2.weights";
-    autoencoder.save_weights(weights_path_2);
+    autoencoder_ver_2.save_weights(weights_path_2);
     
     // Extract features
     std::cout << "\n=== Extracting Features Version 2 ===" << std::endl;
     std::vector<float> train_features_2;
     std::vector<float> test_features_2;
     
-    auto extract_start = std::chrono::high_resolution_clock::now();
+    auto extract_start_2 = std::chrono::high_resolution_clock::now();
     
     autoencoder_ver_2.extract_features(train_images, loader.get_train_size(), train_features_2);
     autoencoder_ver_2.extract_features(loader.get_test_images(), loader.get_test_size(), test_features_2);

@@ -89,13 +89,13 @@ __global__ void maxpool2d_forward_optimized_kernel(const float* input, float* ou
     int total = batch * out_h * out_w * c;
 
     if (idx < total) {
-        if (pool_size == 2 && stride == 2) {
-            int ch = idx % c;
-            int ow = (idx / c) % out_w;
-            int oh = (idx / c / out_w) % out_h;
-            int b = idx / c / out_w / out_h;
+        int ch = idx % c;
+        int ow = (idx / c) % out_w;
+        int oh = (idx / c / out_w) % out_h;
+        int b = idx / c / out_w / out_h;
 
-            float max_val = -INFINITY;
+        float max_val = -INFINITY;
+        if (pool_size == 2 && stride == 2) {
 
             // Loop unrolling cho trường hợp pool size = 2
             // Unroll hoàn toàn cho 2x2 pooling với stride=2

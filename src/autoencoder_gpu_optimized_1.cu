@@ -253,7 +253,7 @@ void AutoencoderGPUOptimized1::forward_gpu_optimized(int batch_size) {
     
     // Conv2D + ReLU (16, 16, 256) -> (16, 16, 128)
     launch_conv2d_shared_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
-                               batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
+                            batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
     launch_relu_forward(d_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS);
     
     // MaxPool2D (16, 16, 128) -> (8, 8, 128)
@@ -263,7 +263,7 @@ void AutoencoderGPUOptimized1::forward_gpu_optimized(int batch_size) {
     // Decoder
     // Conv2D + ReLU (8, 8, 128) -> (8, 8, 128)
     launch_conv2d_shared_forward(d_pool2_out_, d_conv3_out_, d_conv3_weights_, d_conv3_bias_,
-                               batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
+                            batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
     launch_relu_forward(d_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
     
     // Upsample2D (8, 8, 128) -> (16, 16, 128)
@@ -272,7 +272,7 @@ void AutoencoderGPUOptimized1::forward_gpu_optimized(int batch_size) {
     
     // Conv2D + ReLU (16, 16, 128) -> (16, 16, 256)
     launch_conv2d_shared_forward(d_up1_out_, d_conv4_out_, d_conv4_weights_, d_conv4_bias_,
-                                batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
+                         batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1);
     launch_relu_forward(d_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS);
     
     // Upsample2D (16, 16, 256) -> (32, 32, 256)
@@ -308,7 +308,15 @@ void AutoencoderGPUOptimized1::backward_gpu_optimized(int batch_size) {
     launch_zero_grad(d_grad_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3);
     launch_zero_grad(d_grad_conv5_bias_, INPUT_C);
     
+    launch_zero_grad(d_grad_conv5_out_, batch_size * INPUT_H * INPUT_W * INPUT_C);
     launch_zero_grad(d_grad_up2_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
+    launch_zero_grad(d_grad_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS);
+    launch_zero_grad(d_grad_up1_out_, batch_size * 16 * 16 * LATENT_C);
+    launch_zero_grad(d_grad_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
+    launch_zero_grad(d_grad_pool2_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
+    launch_zero_grad(d_grad_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS);
+    launch_zero_grad(d_grad_pool1_out_, batch_size * 16 * 16 * CONV1_FILTERS);
+    launch_zero_grad(d_grad_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
     
     // Compute gradient of loss w.r.t. output
     launch_mse_loss_backward(d_conv5_out_, d_input_, d_grad_conv5_out_, size);
@@ -328,9 +336,9 @@ void AutoencoderGPUOptimized1::backward_gpu_optimized(int batch_size) {
                         batch_size * 16 * 16 * CONV1_FILTERS);
     
     // Conv4 backward: (16, 16, 128) <- (16, 16, 256)
-    launch_conv2d_shared_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_,
-                                 d_grad_up2_out_, d_grad_conv5_weights_, d_grad_conv5_bias_,
-                                 batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
+    launch_conv2d_shared_backward(d_grad_conv4_out_, d_up1_out_, d_conv4_weights_, d_grad_up1_out_,
+                          d_grad_conv4_weights_, d_grad_conv4_bias_,
+                          batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1);
     
     // Upsample1 backward: (8, 8, 128) <- (16, 16, 128)
     launch_upsample2d_backward(d_grad_up1_out_, d_grad_conv3_out_,
@@ -341,9 +349,9 @@ void AutoencoderGPUOptimized1::backward_gpu_optimized(int batch_size) {
                         batch_size * LATENT_H * LATENT_W * LATENT_C);
     
     // Conv3 backward: (8, 8, 128) <- (8, 8, 128)
-    launch_conv2d_shared_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_,
-                                 d_grad_up2_out_, d_grad_conv5_weights_, d_grad_conv5_bias_,
-                                 batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
+    launch_conv2d_shared_backward(d_grad_conv3_out_, d_pool2_out_, d_conv3_weights_, d_grad_pool2_out_,
+                           d_grad_conv3_weights_, d_grad_conv3_bias_,
+                           batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
     
     // Backward through encoder
     // MaxPool2 backward: (16, 16, 128) <- (8, 8, 128)
@@ -355,9 +363,9 @@ void AutoencoderGPUOptimized1::backward_gpu_optimized(int batch_size) {
                         batch_size * 16 * 16 * CONV2_FILTERS);
     
     // Conv2 backward: (16, 16, 256) <- (16, 16, 128)
-    launch_conv2d_shared_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_,
-                                 d_grad_up2_out_, d_grad_conv5_weights_, d_grad_conv5_bias_,
-                                 batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
+    launch_conv2d_shared_backward(d_grad_conv2_out_, d_pool1_out_, d_conv2_weights_, d_grad_pool1_out_,
+                            d_grad_conv2_weights_, d_grad_conv2_bias_,
+                            batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
     
     // MaxPool1 backward: (32, 32, 256) <- (16, 16, 256)
     launch_maxpool2d_backward(d_grad_pool1_out_, d_conv1_out_, d_pool1_out_,
@@ -407,9 +415,9 @@ void AutoencoderGPUOptimized1::train(const std::vector<float>& train_images,
                                      int batch_size,
                                      int epochs,
                                      float learning_rate) {
-    cout << "Training GPU Autoencoder with Memory Optimization" << endl;
-    cout << "Images: " << num_images << ", Batch size: " << batch_size 
-        << ", Epochs: " << epochs << ", LR: " << learning_rate << endl;
+    std::cout << "Training GPU Autoencoder with Memory Optimization" << std::endl;
+    std::cout << "Images: " << num_images << ", Batch size: " << batch_size 
+        << ", Epochs: " << epochs << ", LR: " << learning_rate << std::endl;
     
     allocate_device_memory(batch_size);
     
