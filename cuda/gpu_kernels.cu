@@ -87,7 +87,7 @@ void launch_relu_forward(float* d_data, int size) {
 }
 
 // ==================== Max Pooling Kernel ====================
-__global__ void maxpool2d_forward_kernel(const float* input, float* output, float* indices
+__global__ void maxpool2d_forward_kernel(const float* input, float* output, float* indices,
                                          int batch, int h, int w, int c, int out_h, int out_w,
                                          int pool_size, int stride) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -395,7 +395,7 @@ __global__ void maxpool2d_backward_kernel(const float* grad_output, const float*
     }
 }
 
-void launch_maxpool2d_backward(const float* d_grad_output, float* d_grad_input, const float* indices,
+void launch_maxpool2d_backward(const float* d_grad_output, float* d_input, const float* indices,
                                const float* d_output, float* d_grad_input,
                                int batch, int h, int w, int c,
                                int pool_size, int stride) {

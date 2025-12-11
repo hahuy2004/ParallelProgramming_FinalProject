@@ -541,7 +541,7 @@ void AutoencoderGPUOptimized1::extract_features(const std::vector<float>& images
         launch_relu_forward(d_conv1_out_, actual_batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
         
         // MaxPool2D (32, 32, 256) -> (16, 16, 256)
-        launch_maxpool2d_forward(d_conv1_out_, d_pool1_out_,
+        launch_maxpool2d_forward(d_conv1_out_, d_pool1_out_, d_indices1_,
                                 actual_batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
         
         // Conv2D + ReLU (16, 16, 256) -> (16, 16, 128)
@@ -550,7 +550,7 @@ void AutoencoderGPUOptimized1::extract_features(const std::vector<float>& images
         launch_relu_forward(d_conv2_out_, actual_batch_size * 16 * 16 * CONV2_FILTERS);
         
         // MaxPool2D (16, 16, 128) -> (8, 8, 128)
-        launch_maxpool2d_forward(d_conv2_out_, d_pool2_out_,
+        launch_maxpool2d_forward(d_conv2_out_, d_pool2_out_, d_indices2_,
                                 actual_batch_size, 16, 16, CONV2_FILTERS, 2, 2);
         
         // Async copy back using pinned memory

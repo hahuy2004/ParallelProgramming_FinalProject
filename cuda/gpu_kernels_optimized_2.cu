@@ -111,24 +111,22 @@ __global__ void maxpool2d_forward_optimized_kernel(const float* input, float* ou
             float val3 = input[base_idx + w * c + c];
             
             max_val = val0;
-            max_idx = idx0;
+            max_idx = base_idx;
 
             // So sánh với val1
             if (val1 > max_val) {
                 max_val = val1;
-                max_idx = idx1;
+                max_idx = base_idx + c;
             }
-
-            // So sánh với val2
+            // So sánh với val2
             if (val2 > max_val) {
                 max_val = val2;
-                max_idx = idx2;
+                max_idx = base_idx + w * c;
             }
-            
-            // So sánh với val3
+            // So sánh với val3
             if (val3 > max_val) {
                 max_val = val3;
-                max_idx = idx3;
+                max_idx = base_idx + w * c + c;
             }
         }
         else{
@@ -140,7 +138,7 @@ __global__ void maxpool2d_forward_optimized_kernel(const float* input, float* ou
                     max_val = fmaxf(max_val, input[in_idx]);
                     if(input[in_idx] > max_val){
                         max_val = input[in_idx];
-                        max_id = in_idx;
+                        max_idx = in_idx;
                     }
                 }
             }
