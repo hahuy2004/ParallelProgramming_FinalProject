@@ -34,8 +34,10 @@ AutoencoderGPU::AutoencoderGPU() : current_batch_size_(0) {
     d_input_ = nullptr;
     d_conv1_out_ = nullptr;
     d_pool1_out_ = nullptr;
+    d_indices1_ = nullptr;
     d_conv2_out_ = nullptr;
     d_pool2_out_ = nullptr;
+    d_indices2_ = nullptr;
     d_conv3_out_ = nullptr;
     d_up1_out_ = nullptr;
     d_conv4_out_ = nullptr;
@@ -113,6 +115,9 @@ void AutoencoderGPU::initialize_weights() {
     
     // Allocate loss buffer
     CUDA_CHECK(cudaMalloc(&d_loss_, sizeof(float)));
+
+    // Allocate indices
+    CUDA_CHECK(cudaMalloc(&d_loss_, sizeof(float)));
     
     // Allocate gradient buffers for weights
     CUDA_CHECK(cudaMalloc(&d_grad_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3 * sizeof(float)));
@@ -137,8 +142,10 @@ void AutoencoderGPU::allocate_device_memory(int batch_size) {
         cudaFree(d_input_);
         cudaFree(d_conv1_out_);
         cudaFree(d_pool1_out_);
+        cudaFree(d_indices1_);
         cudaFree(d_conv2_out_);
         cudaFree(d_pool2_out_);
+        cudaFree(d_indices2_);
         cudaFree(d_conv3_out_);
         cudaFree(d_up1_out_);
         cudaFree(d_conv4_out_);
@@ -162,8 +169,10 @@ void AutoencoderGPU::allocate_device_memory(int batch_size) {
     CUDA_CHECK(cudaMalloc(&d_input_, batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_pool1_out_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_indices1_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_pool2_out_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_indices2_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_up1_out_, batch_size * 16 * 16 * LATENT_C * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
@@ -197,8 +206,10 @@ void AutoencoderGPU::free_device_memory() {
     if (d_input_) cudaFree(d_input_);
     if (d_conv1_out_) cudaFree(d_conv1_out_);
     if (d_pool1_out_) cudaFree(d_pool1_out_);
+    if (d_indices1_) cudaFree(d_indices1_);
     if (d_conv2_out_) cudaFree(d_conv2_out_);
     if (d_pool2_out_) cudaFree(d_pool2_out_);
+    if (d_indices2_) cudaFree(d_indices2_);
     if (d_conv3_out_) cudaFree(d_conv3_out_);
     if (d_up1_out_) cudaFree(d_up1_out_);
     if (d_conv4_out_) cudaFree(d_conv4_out_);
@@ -238,7 +249,7 @@ void AutoencoderGPU::forward_gpu(int batch_size) {
     launch_relu_forward(d_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
     
     // MaxPool: (32, 32, 256) -> (16, 16, 256)
-    launch_maxpool2d_forward(d_conv1_out_, d_pool1_out_,
+    launch_maxpool2d_forward(d_conv1_out_, d_pool1_out_, d_indices1_,
                             batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
     
     // Conv2 + ReLU: (16, 16, 256) -> (16, 16, 128)
@@ -247,7 +258,7 @@ void AutoencoderGPU::forward_gpu(int batch_size) {
     launch_relu_forward(d_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS);
     
     // MaxPool: (16, 16, 128) -> (8, 8, 128) - Latent
-    launch_maxpool2d_forward(d_conv2_out_, d_pool2_out_,
+    launch_maxpool2d_forward(d_conv2_out_, d_pool2_out_, d_indices2_,
                             batch_size, 16, 16, CONV2_FILTERS, 2, 2);
     
     // Decoder
@@ -348,7 +359,7 @@ void AutoencoderGPU::backward_gpu(int batch_size) {
     
     // Backward through encoder
     // MaxPool2 backward: (16, 16, 128) <- (8, 8, 128)
-    launch_maxpool2d_backward(d_grad_pool2_out_, d_conv2_out_, d_pool2_out_,
+    launch_maxpool2d_backward(d_grad_pool2_out_, d_conv2_out_, d_indices2_, d_pool2_out_,
                              d_grad_conv2_out_, batch_size, 16, 16, CONV2_FILTERS, 2, 2);
     
     // ReLU2 backward
@@ -361,7 +372,7 @@ void AutoencoderGPU::backward_gpu(int batch_size) {
                           batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
     
     // MaxPool1 backward: (32, 32, 256) <- (16, 16, 256)
-    launch_maxpool2d_backward(d_grad_pool1_out_, d_conv1_out_, d_pool1_out_,
+    launch_maxpool2d_backward(d_grad_pool1_out_, d_conv1_out_, d_indices1_, d_pool1_out_, d_indices1_,
                              d_grad_conv1_out_, batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
     
     // ReLU1 backward
@@ -566,14 +577,14 @@ void AutoencoderGPU::extract_features(const std::vector<float>& images,
                              actual_batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
         launch_relu_forward(d_conv1_out_, actual_batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
         
-        launch_maxpool2d_forward(d_conv1_out_, d_pool1_out_,
+        launch_maxpool2d_forward(d_conv1_out_, d_pool1_out_, d_indices1_,
                                 actual_batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
         
         launch_conv2d_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
                              actual_batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
         launch_relu_forward(d_conv2_out_, actual_batch_size * 16 * 16 * CONV2_FILTERS);
         
-        launch_maxpool2d_forward(d_conv2_out_, d_pool2_out_,
+        launch_maxpool2d_forward(d_conv2_out_, d_pool2_out_, d_indices2_,
                                 actual_batch_size, 16, 16, CONV2_FILTERS, 2, 2);
         
         // Copy latent features back to host

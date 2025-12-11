@@ -8,7 +8,7 @@ void launch_conv2d_relu_bias_forward(const float* d_input, float* d_output,
                                      int out_c, int kernel_size, int stride, int padding);
 
 // Sử dụng unroll looping cho các vòng duyệt kernel kích thước nhỏ như poolsize =2
-void launch_maxpool2d_optimized_forward(const float* d_input, float* d_output,
+void launch_maxpool2d_optimized_forward(const float* d_input, float* d_output, float* indices,
                                     int batch, int h, int w, int c,
                                     int pool_size, int stride);
                                     

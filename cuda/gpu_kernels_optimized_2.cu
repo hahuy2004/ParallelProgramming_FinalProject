@@ -78,7 +78,7 @@ void launch_conv2d_relu_bias_forward(const float* d_input, float* d_output,
 }
 
 // Hàm này áp dụng cho pool size = 2 theo đề bài quy định
-__global__ void maxpool2d_forward_optimized_kernel(const float* input, float* output,
+__global__ void maxpool2d_forward_optimized_kernel(const float* input, float* output, float* indices,
                                         int batch, int h, int w, int c,
                                         int pool_size, int stride) {
     int out_h = (h - pool_size) / stride + 1;
@@ -94,6 +94,7 @@ __global__ void maxpool2d_forward_optimized_kernel(const float* input, float* ou
         int b = idx / c / out_w / out_h;
 
         float max_val = -INFINITY;
+        int max_idx = -1;
         if (pool_size == 2 && stride == 2) {
 
             // Loop unrolling cho trường hợp pool size = 2
@@ -109,8 +110,26 @@ __global__ void maxpool2d_forward_optimized_kernel(const float* input, float* ou
             float val2 = input[base_idx + w * c];
             float val3 = input[base_idx + w * c + c];
             
-            // Tìm max của 4 giá trị (unrolled comparison)
-            max_val = fmaxf(fmaxf(val0, val1), fmaxf(val2, val3));
+            max_val = val0;
+            max_idx = idx0;
+
+            // So sánh với val1
+            if (val1 > max_val) {
+                max_val = val1;
+                max_idx = idx1;
+            }
+
+            // So sánh với val2
+            if (val2 > max_val) {
+                max_val = val2;
+                max_idx = idx2;
+            }
+            
+            // So sánh với val3
+            if (val3 > max_val) {
+                max_val = val3;
+                max_idx = idx3;
+            }
         }
         else{
             for (int ph = 0; ph < pool_size; ++ph) {
@@ -119,15 +138,19 @@ __global__ void maxpool2d_forward_optimized_kernel(const float* input, float* ou
                     int iw = ow * stride + pw;
                     int in_idx = b * h * w * c + ih * w * c + iw * c + ch;
                     max_val = fmaxf(max_val, input[in_idx]);
+                    if(input[in_idx] > max_val){
+                        max_val = input[in_idx];
+                        max_id = in_idx;
+                    }
                 }
             }
         }
-
+        indices[idx] = (float)max_idx;
         output[idx] = max_val;
     }
 }
 
-void launch_maxpool2d_optimized_forward(const float* d_input, float* d_output,
+void launch_maxpool2d_optimized_forward(const float* d_input, float* d_output, float* indices,
                                         int batch, int h, int w, int c,
                                         int pool_size, int stride) {
     int out_h = (h - pool_size) / stride + 1;
@@ -138,7 +161,7 @@ void launch_maxpool2d_optimized_forward(const float* d_input, float* d_output,
     int grid_size = (total + block_size - 1) / block_size;
 
     maxpool2d_forward_optimized_kernel<<<grid_size, block_size>>>(
-    d_input, d_output, batch, h, w, c, pool_size, stride);
+    d_input, d_output, indices, batch, h, w, c, pool_size, stride);
 
     CUDA_CHECK(cudaGetLastError());
 }

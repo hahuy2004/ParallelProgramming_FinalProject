@@ -42,7 +42,7 @@ private:
     float* h_pinned_input_;
     float* h_pinned_output_;
     
-    // Device pointers (same as naive version)
+    // Device pointers for weights
     float* d_conv1_weights_;
     float* d_conv1_bias_;
     float* d_conv2_weights_;
@@ -54,17 +54,21 @@ private:
     float* d_conv5_weights_;
     float* d_conv5_bias_;
     
+    // Device pointers for activations
     float* d_input_;
     float* d_conv1_out_;
     float* d_pool1_out_;
+    float* d_indices1_;
     float* d_conv2_out_;
     float* d_pool2_out_;
+    float* d_indices2_;
     float* d_conv3_out_;
     float* d_up1_out_;
     float* d_conv4_out_;
     float* d_up2_out_;
     float* d_conv5_out_;
     
+    // Device pointers for gradients
     float* d_grad_conv5_out_;
     float* d_grad_up2_out_;
     float* d_grad_conv4_out_;
@@ -86,7 +90,7 @@ private:
     float* d_grad_conv5_weights_;
     float* d_grad_conv5_bias_;
     
-    float* d_loss_;
+    float* d_loss_;  // For computing loss on device
     
     int current_batch_size_;
     

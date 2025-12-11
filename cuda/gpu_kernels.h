@@ -13,7 +13,7 @@ void launch_conv2d_forward(const float* d_input, float* d_output,
 void launch_relu_forward(float* d_data, int size);
 
 // Max pooling
-void launch_maxpool2d_forward(const float* d_input, float* d_output,
+void launch_maxpool2d_forward(const float* d_input, float* d_output, float* indices, 
                               int batch, int h, int w, int c,
                               int pool_size, int stride);
 
@@ -53,7 +53,7 @@ void launch_relu_backward(const float* d_grad_output, const float* d_input,
                          float* d_grad_input, int size);
 
 // MaxPool2D Backward
-void launch_maxpool2d_backward(const float* d_grad_output, const float* d_input,
+void launch_maxpool2d_backward(const float* d_grad_output, const float* d_input, const float* indices,
                                const float* d_output, float* d_grad_input,
                                int batch, int h, int w, int c,
                                int pool_size, int stride);

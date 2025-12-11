@@ -57,8 +57,10 @@ private:
     float* d_input_;
     float* d_conv1_out_;
     float* d_pool1_out_;
+    float* d_indices1_;
     float* d_conv2_out_;
     float* d_pool2_out_;
+    float* d_indices2_;
     float* d_conv3_out_;
     float* d_up1_out_;
     float* d_conv4_out_;

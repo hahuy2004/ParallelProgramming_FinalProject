@@ -87,12 +87,9 @@ void launch_relu_forward(float* d_data, int size) {
 }
 
 // ==================== Max Pooling Kernel ====================
-__global__ void maxpool2d_forward_kernel(const float* input, float* output,
-                                         int batch, int h, int w, int c,
+__global__ void maxpool2d_forward_kernel(const float* input, float* output, float* indices
+                                         int batch, int h, int w, int c, int out_h, int out_w,
                                          int pool_size, int stride) {
-    int out_h = (h - pool_size) / stride + 1;
-    int out_w = (w - pool_size) / stride + 1;
-    
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int total = batch * out_h * out_w * c;
     
@@ -103,6 +100,7 @@ __global__ void maxpool2d_forward_kernel(const float* input, float* output,
         int b = idx / c / out_w / out_h;
         
         float max_val = -INFINITY;
+        int max_idx = -1;
         
         for (int ph = 0; ph < pool_size; ++ph) {
             for (int pw = 0; pw < pool_size; ++pw) {
@@ -110,14 +108,16 @@ __global__ void maxpool2d_forward_kernel(const float* input, float* output,
                 int iw = ow * stride + pw;
                 int in_idx = b * h * w * c + ih * w * c + iw * c + ch;
                 max_val = fmaxf(max_val, input[in_idx]);
+                max_idx = in_idx;
             }
         }
         
         output[idx] = max_val;
+        indices[idx] = (float)max_idx;
     }
 }
 
-void launch_maxpool2d_forward(const float* d_input, float* d_output,
+void launch_maxpool2d_forward(const float* d_input, float* d_output, float* indices,
                               int batch, int h, int w, int c,
                               int pool_size, int stride) {
     int out_h = (h - pool_size) / stride + 1;
@@ -128,18 +128,15 @@ void launch_maxpool2d_forward(const float* d_input, float* d_output,
     int grid_size = (total + block_size - 1) / block_size;
     
     maxpool2d_forward_kernel<<<grid_size, block_size>>>(
-        d_input, d_output, batch, h, w, c, pool_size, stride);
+        d_input, d_output, indices, batch, h, w, c, out_h, out_w, pool_size, stride);
     
     CUDA_CHECK(cudaGetLastError());
 }
 
 // ==================== Upsampling Kernel ====================
 __global__ void upsample2d_forward_kernel(const float* input, float* output,
-                                          int batch, int in_h, int in_w, int c,
+                                          int batch, int in_h, int in_w, int c, int out_h, int out_w,
                                           int scale_factor) {
-    int out_h = in_h * scale_factor;
-    int out_w = in_w * scale_factor;
-    
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int total = batch * out_h * out_w * c;
     
@@ -168,7 +165,7 @@ void launch_upsample2d_forward(const float* d_input, float* d_output,
     int grid_size = (total + block_size - 1) / block_size;
     
     upsample2d_forward_kernel<<<grid_size, block_size>>>(
-        d_input, d_output, batch, in_h, in_w, c, scale_factor);
+        d_input, d_output, batch, in_h, in_w, c, out_h, out_w, scale_factor);
     
     CUDA_CHECK(cudaGetLastError());
 }
@@ -251,10 +248,8 @@ void launch_sgd_update(float* d_weights, const float* d_grad,
 // ==================== Fused Convolution + ReLU (Optimized) ====================
 __global__ void conv2d_relu_forward_kernel(const float* input, float* output,
                                            const float* weights, const float* bias,
-                                           int batch, int in_h, int in_w, int in_c,
+                                           int batch, int in_h, int in_w, int in_c, int out_h, int out_w,
                                            int out_c, int kernel_size, int stride, int padding) {
-    int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
-    int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
     
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int total = batch * out_h * out_w * out_c;
@@ -301,7 +296,7 @@ void launch_conv2d_relu_forward(const float* d_input, float* d_output,
     
     conv2d_relu_forward_kernel<<<grid_size, block_size>>>(
         d_input, d_output, d_weights, d_bias,
-        batch, in_h, in_w, in_c, out_c, kernel_size, stride, padding);
+        batch, in_h, in_w, in_c, out_h, out_w, out_c, kernel_size, stride, padding);
     
     CUDA_CHECK(cudaGetLastError());
 }
@@ -312,11 +307,8 @@ void launch_conv2d_relu_forward(const float* d_input, float* d_output,
 __global__ void conv2d_backward_kernel(const float* grad_output, const float* input,
                                        const float* weights, float* grad_input,
                                        float* grad_weights, float* grad_bias,
-                                       int batch, int in_h, int in_w, int in_c,
+                                       int batch, int in_h, int in_w, int in_c, int out_h, int out_w,
                                        int out_c, int kernel_size, int stride, int padding) {
-    int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
-    int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
-    
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int total = batch * out_h * out_w * out_c;
     
@@ -370,7 +362,7 @@ void launch_conv2d_backward(const float* d_grad_output, const float* d_input,
     conv2d_backward_kernel<<<grid_size, block_size>>>(
         d_grad_output, d_input, d_weights, d_grad_input,
         d_grad_weights, d_grad_bias,
-        batch, in_h, in_w, in_c, out_c, kernel_size, stride, padding);
+        batch, in_h, in_w, in_c, out_h, out_w, out_c, kernel_size, stride, padding);
     
     CUDA_CHECK(cudaGetLastError());
 }
@@ -394,42 +386,16 @@ void launch_relu_backward(const float* d_grad_output, const float* d_input,
 }
 
 // MaxPool2D Backward: route gradient to the max location
-__global__ void maxpool2d_backward_kernel(const float* grad_output, const float* input,
-                                          const float* output, float* grad_input,
-                                          int batch, int h, int w, int c,
-                                          int pool_size, int stride) {
-    int out_h = (h - pool_size) / stride + 1;
-    int out_w = (w - pool_size) / stride + 1;
-    
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int total = batch * out_h * out_w * c;
-    
-    if (idx < total) {
-        int ch = idx % c;
-        int ow = (idx / c) % out_w;
-        int oh = (idx / c / out_w) % out_h;
-        int b = idx / c / out_w / out_h;
-        
-        float grad_out_val = grad_output[idx];
-        float max_val = output[idx];
-        
-        // Find which input position produced the max
-        for (int ph = 0; ph < pool_size; ++ph) {
-            for (int pw = 0; pw < pool_size; ++pw) {
-                int ih = oh * stride + ph;
-                int iw = ow * stride + pw;
-                int in_idx = b * h * w * c + ih * w * c + iw * c + ch;
-                
-                // Route gradient to the max position
-                if (input[in_idx] == max_val) {
-                    atomicAdd(&grad_input[in_idx], grad_out_val);
-                }
-            }
-        }
+__global__ void maxpool2d_backward_kernel(const float* grad_output, const float* indices,
+                                          float* grad_input, int total) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < total) {
+        int max_idx = (int)indices[i];
+        if (max_idx != -1) atomicAdd(&grad_input[max_idx], grad_output[i]);
     }
 }
 
-void launch_maxpool2d_backward(const float* d_grad_output, const float* d_input,
+void launch_maxpool2d_backward(const float* d_grad_output, float* d_grad_input, const float* indices,
                                const float* d_output, float* d_grad_input,
                                int batch, int h, int w, int c,
                                int pool_size, int stride) {
@@ -441,54 +407,46 @@ void launch_maxpool2d_backward(const float* d_grad_output, const float* d_input,
     int grid_size = (total + block_size - 1) / block_size;
     
     maxpool2d_backward_kernel<<<grid_size, block_size>>>(
-        d_grad_output, d_input, d_output, d_grad_input,
-        batch, h, w, c, pool_size, stride);
+        d_grad_output, indices, d_grad_input, total);
     
     CUDA_CHECK(cudaGetLastError());
 }
 
-// UpSample2D Backward: sum gradients from upsampled positions
+// UpSample2D Backward
 __global__ void upsample2d_backward_kernel(const float* grad_output, float* grad_input,
-                                           int batch, int in_h, int in_w, int c,
-                                           int scale_factor) {
-    int out_h = in_h * scale_factor;
-    int out_w = in_w * scale_factor;
-    
+                                           int batch, int in_h, int in_w, int c, int out_h, int out_w,
+                                           int scale_factor) {  
+
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int total = batch * in_h * in_w * c;
-    
-    if (idx < total) {
+    int total_out = batch * out_h * out_w * c;  // số phần tử của grad_output
+
+    if (idx < total_out) {
         int ch = idx % c;
-        int iw = (idx / c) % in_w;
-        int ih = (idx / c / in_w) % in_h;
-        int b = idx / c / in_w / in_h;
-        
-        float grad_sum = 0.0f;
-        
-        // Sum gradients from all upsampled positions
-        for (int sh = 0; sh < scale_factor; ++sh) {
-            for (int sw = 0; sw < scale_factor; ++sw) {
-                int oh = ih * scale_factor + sh;
-                int ow = iw * scale_factor + sw;
-                int out_idx = b * out_h * out_w * c + oh * out_w * c + ow * c + ch;
-                grad_sum += grad_output[out_idx];
-            }
-        }
-        
-        grad_input[idx] = grad_sum;
+        int ow = (idx / c) % out_w;
+        int oh = (idx / c / out_w) % out_h;
+        int b  = idx / c / out_w / out_h;
+
+        // ánh xạ về tọa độ input gốc
+        int in_h_idx = oh / scale_factor;
+        int in_w_idx = ow / scale_factor;
+
+        int in_idx = b * in_h * in_w * c + in_h_idx * in_w * c + in_w_idx * c + ch;
+        atomicAdd(&grad_input[in_idx], grad_output[idx]);
     }
 }
 
 void launch_upsample2d_backward(const float* d_grad_output, float* d_grad_input,
                                 int batch, int in_h, int in_w, int c,
                                 int scale_factor) {
-    int total = batch * in_h * in_w * c;
+    int out_h = in_h * scale_factor;
+    int out_w = in_w * scale_factor;
+    int total_out = batch * out_h * out_w * c;
     
     int block_size = 256;
-    int grid_size = (total + block_size - 1) / block_size;
+    int grid_size = (total_out + block_size - 1) / block_size;
     
     upsample2d_backward_kernel<<<grid_size, block_size>>>(
-        d_grad_output, d_grad_input, batch, in_h, in_w, c, scale_factor);
+        d_grad_output, d_grad_input, batch, in_h, in_w, c, out_h, out_w, scale_factor);
     
     CUDA_CHECK(cudaGetLastError());
 }
