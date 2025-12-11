@@ -462,15 +462,6 @@ minimize wasted threads. Different layers may benefit from different configurati
 Use FP16 for forward pass and most computations, FP32 for weight updates and
 accumulators. Reduces memory bandwidth.
 Category 3: Parallelism & Concurrency
-14. Gradient Checkpointing
-Store only subset of activations during forward pass, recompute others during backward
-pass. Trades computation for memory, enabling larger batch sizes.
-15. Multi-Stream Pipeline
-Use multiple CUDA streams to overlap H2D transfer, computation, and D2H transfer.
-Can hide transfer latency by processing next batch while current batch trains.
-16. Batched Operations
-Process multiple images in parallel rather than one at a time. Amortizes kernel launch
-overhead and improves GPU occupancy.
 
 
 Phase 4: SVM Integration and analysed result

@@ -85,7 +85,7 @@ void AutoencoderGPUOptimized1::initialize_weights() {
     // He initilization
     auto init_and_upload = [&](float** d_ptr, int size, int fan_in) {
         std::vector<float> h_weights(size);
-        float std = std::sqrt(2.0f / fan_in);
+        float std = sqrt(2.0f / fan_in);
         std::normal_distribution<float> dist(0.0f, std);
         for (auto& w : h_weights) w = dist(gen);
         
@@ -128,7 +128,7 @@ void AutoencoderGPUOptimized1::initialize_weights() {
     CUDA_CHECK(cudaMalloc(&d_grad_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3 * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_grad_conv5_bias_, INPUT_C * sizeof(float)));
     
-    std::cout << "GPU Optimized weights initialized" << std::endl;
+    std::cout << "GPU Weights initialized" << std::endl;
 }
 
 void AutoencoderGPUOptimized1::allocate_device_memory(int batch_size) {
@@ -239,46 +239,48 @@ void AutoencoderGPUOptimized1::free_device_memory() {
 }
 
 void AutoencoderGPUOptimized1::forward_gpu_optimized(int batch_size) {
-    // Sử dụng shared memory
+    // Sử dụng shared memory cho convolution
+
+    //Encoder
+    // Conv2D + ReLU (32, 32, 3) -> (32, 32, 256)
     launch_conv2d_shared_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
                                batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
-    
     launch_relu_forward(d_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
     
-    // MaxPool: (32, 32, 256) -> (16, 16, 256)
+    // MaxPool2D (32, 32, 256) -> (16, 16, 256)
     launch_maxpool2d_forward(d_conv1_out_, d_pool1_out_,
                             batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
     
-    // Conv2 + ReLU: (16, 16, 256) -> (16, 16, 128)
-    launch_conv2d_shared_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
-                               batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
+    // Conv2D + ReLU (16, 16, 256) -> (16, 16, 128)
+    launch_conv2d_shared_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
+                            batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
     launch_relu_forward(d_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS);
     
-    // MaxPool: (16, 16, 128) -> (8, 8, 128) - Latent
+    // MaxPool2D (16, 16, 128) -> (8, 8, 128)
     launch_maxpool2d_forward(d_conv2_out_, d_pool2_out_,
                             batch_size, 16, 16, CONV2_FILTERS, 2, 2);
     
     // Decoder
-    // Conv3 + ReLU: (8, 8, 128) -> (8, 8, 128)
-    launch_conv2d_shared_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
-                               batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
+    // Conv2D + ReLU (8, 8, 128) -> (8, 8, 128)
+    launch_conv2d_shared_forward(d_pool2_out_, d_conv3_out_, d_conv3_weights_, d_conv3_bias_,
+                            batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
     launch_relu_forward(d_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
     
-    // Upsample: (8, 8, 128) -> (16, 16, 128)
+    // Upsample2D (8, 8, 128) -> (16, 16, 128)
     launch_upsample2d_forward(d_conv3_out_, d_up1_out_,
                              batch_size, LATENT_H, LATENT_W, LATENT_C, 2);
     
-    // Conv4 + ReLU: (16, 16, 128) -> (16, 16, 256)
-    launch_conv2d_shared_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
-                                batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
+    // Conv2D + ReLU (16, 16, 128) -> (16, 16, 256)
+    launch_conv2d_shared_forward(d_up1_out_, d_conv4_out_, d_conv4_weights_, d_conv4_bias_,
+                         batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1);
     launch_relu_forward(d_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS);
     
-    // Upsample: (16, 16, 256) -> (32, 32, 256)
+    // Upsample2D (16, 16, 256) -> (32, 32, 256)
     launch_upsample2d_forward(d_conv4_out_, d_up2_out_,
                              batch_size, 16, 16, CONV1_FILTERS, 2);
     
-    // Conv5 (no activation): (32, 32, 256) -> (32, 32, 3)
-    launch_conv2d_forward(d_up2_out_, d_conv5_out_, d_conv5_weights_, d_conv5_bias_,
+    // Conv2D (32, 32, 256) -> (32, 32, 3)
+    launch_conv2d_shared_forward(d_up2_out_, d_conv5_out_, d_conv5_weights_, d_conv5_bias_,
                          batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
 }
 
@@ -288,6 +290,8 @@ float AutoencoderGPUOptimized1::compute_loss_gpu(int batch_size) {
     
     float h_loss;
     CUDA_CHECK(cudaMemcpy(&h_loss, d_loss_, sizeof(float), cudaMemcpyDeviceToHost));
+    printf("h_loss: %f\n", h_loss);
+    printf("size: %d\n", size);
     return h_loss / size;
 }
 
@@ -306,7 +310,15 @@ void AutoencoderGPUOptimized1::backward_gpu_optimized(int batch_size) {
     launch_zero_grad(d_grad_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3);
     launch_zero_grad(d_grad_conv5_bias_, INPUT_C);
     
+    launch_zero_grad(d_grad_conv5_out_, batch_size * INPUT_H * INPUT_W * INPUT_C);
     launch_zero_grad(d_grad_up2_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
+    launch_zero_grad(d_grad_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS);
+    launch_zero_grad(d_grad_up1_out_, batch_size * 16 * 16 * LATENT_C);
+    launch_zero_grad(d_grad_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
+    launch_zero_grad(d_grad_pool2_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
+    launch_zero_grad(d_grad_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS);
+    launch_zero_grad(d_grad_pool1_out_, batch_size * 16 * 16 * CONV1_FILTERS);
+    launch_zero_grad(d_grad_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
     
     // Compute gradient of loss w.r.t. output
     launch_mse_loss_backward(d_conv5_out_, d_input_, d_grad_conv5_out_, size);
@@ -326,9 +338,9 @@ void AutoencoderGPUOptimized1::backward_gpu_optimized(int batch_size) {
                         batch_size * 16 * 16 * CONV1_FILTERS);
     
     // Conv4 backward: (16, 16, 128) <- (16, 16, 256)
-    launch_conv2d_shared_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_,
-                                 d_grad_up2_out_, d_grad_conv5_weights_, d_grad_conv5_bias_,
-                                 batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
+    launch_conv2d_shared_backward(d_grad_conv4_out_, d_up1_out_, d_conv4_weights_, d_grad_up1_out_,
+                          d_grad_conv4_weights_, d_grad_conv4_bias_,
+                          batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1);
     
     // Upsample1 backward: (8, 8, 128) <- (16, 16, 128)
     launch_upsample2d_backward(d_grad_up1_out_, d_grad_conv3_out_,
@@ -339,9 +351,9 @@ void AutoencoderGPUOptimized1::backward_gpu_optimized(int batch_size) {
                         batch_size * LATENT_H * LATENT_W * LATENT_C);
     
     // Conv3 backward: (8, 8, 128) <- (8, 8, 128)
-    launch_conv2d_shared_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_,
-                                 d_grad_up2_out_, d_grad_conv5_weights_, d_grad_conv5_bias_,
-                                 batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
+    launch_conv2d_shared_backward(d_grad_conv3_out_, d_pool2_out_, d_conv3_weights_, d_grad_pool2_out_,
+                           d_grad_conv3_weights_, d_grad_conv3_bias_,
+                           batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
     
     // Backward through encoder
     // MaxPool2 backward: (16, 16, 128) <- (8, 8, 128)
@@ -353,9 +365,9 @@ void AutoencoderGPUOptimized1::backward_gpu_optimized(int batch_size) {
                         batch_size * 16 * 16 * CONV2_FILTERS);
     
     // Conv2 backward: (16, 16, 256) <- (16, 16, 128)
-    launch_conv2d_shared_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_,
-                                 d_grad_up2_out_, d_grad_conv5_weights_, d_grad_conv5_bias_,
-                                 batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
+    launch_conv2d_shared_backward(d_grad_conv2_out_, d_pool1_out_, d_conv2_weights_, d_grad_pool1_out_,
+                            d_grad_conv2_weights_, d_grad_conv2_bias_,
+                            batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
     
     // MaxPool1 backward: (32, 32, 256) <- (16, 16, 256)
     launch_maxpool2d_backward(d_grad_pool1_out_, d_conv1_out_, d_pool1_out_,
@@ -378,7 +390,7 @@ void AutoencoderGPUOptimized1::backward_gpu_optimized(int batch_size) {
 }
 
 void AutoencoderGPUOptimized1::update_weights_gpu(float learning_rate, int batch_size) {
-    // Update all weights using SGD
+    // Sử dụng SGD để cập nhật trọng số
     launch_sgd_update(d_conv1_weights_, d_grad_conv1_weights_, learning_rate,
                      CONV1_FILTERS * INPUT_C * 3 * 3);
     launch_sgd_update(d_conv1_bias_, d_grad_conv1_bias_, learning_rate, CONV1_FILTERS);
@@ -405,9 +417,9 @@ void AutoencoderGPUOptimized1::train(const std::vector<float>& train_images,
                                      int batch_size,
                                      int epochs,
                                      float learning_rate) {
-    std::cout << "Training GPU Autoencoder (Optimized)..." << std::endl;
+    std::cout << "Training GPU Autoencoder with Memory Optimization" << std::endl;
     std::cout << "Images: " << num_images << ", Batch size: " << batch_size 
-              << ", Epochs: " << epochs << ", LR: " << learning_rate << std::endl;
+        << ", Epochs: " << epochs << ", LR: " << learning_rate << std::endl;
     
     allocate_device_memory(batch_size);
     
@@ -452,6 +464,7 @@ void AutoencoderGPUOptimized1::train(const std::vector<float>& train_images,
             
             // Compute loss
             float loss = compute_loss_gpu(actual_batch_size);
+            printf("Loss:%f\n", loss);
             epoch_loss += loss;
             
             // Backward pass (optimized)
@@ -492,7 +505,7 @@ void AutoencoderGPUOptimized1::extract_features(const std::vector<float>& images
                                                 std::vector<float>& features) {
     features.resize(num_images * LATENT_DIM);
     
-    int batch_size = 128;  // Larger batch size for optimized version
+    int batch_size = 64;  // Larger batch size for optimized version
     int num_batches = (num_images + batch_size - 1) / batch_size;
     
     auto start = std::chrono::high_resolution_clock::now();
@@ -516,16 +529,22 @@ void AutoencoderGPUOptimized1::extract_features(const std::vector<float>& images
                                   actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
                                   cudaMemcpyHostToDevice));
         
-        // Run encoder only (fused operations)
-        launch_conv2d_relu_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
+        // Run encoder only (using shared memory kernels, no fusion)
+        // Conv2D + ReLU (32, 32, 3) -> (32, 32, 256)
+        launch_conv2d_shared_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
                                    actual_batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
+        launch_relu_forward(d_conv1_out_, actual_batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
         
+        // MaxPool2D (32, 32, 256) -> (16, 16, 256)
         launch_maxpool2d_forward(d_conv1_out_, d_pool1_out_,
                                 actual_batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
         
-        launch_conv2d_relu_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
+        // Conv2D + ReLU (16, 16, 256) -> (16, 16, 128)
+        launch_conv2d_shared_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
                                    actual_batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
+        launch_relu_forward(d_conv2_out_, actual_batch_size * 16 * 16 * CONV2_FILTERS);
         
+        // MaxPool2D (16, 16, 128) -> (8, 8, 128)
         launch_maxpool2d_forward(d_conv2_out_, d_pool2_out_,
                                 actual_batch_size, 16, 16, CONV2_FILTERS, 2, 2);
         

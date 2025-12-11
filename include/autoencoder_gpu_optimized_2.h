@@ -38,10 +38,6 @@ private:
     static constexpr int LATENT_C = 128;
     static constexpr int LATENT_DIM = LATENT_H * LATENT_W * LATENT_C;
     
-    // Pinned host memory for faster transfers
-    float* h_pinned_input_;
-    float* h_pinned_output_;
-    
     // Device pointers (same as naive version)
     float* d_conv1_weights_;
     float* d_conv1_bias_;

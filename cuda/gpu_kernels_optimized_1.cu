@@ -1,4 +1,4 @@
-// Tập trung vào tối ưu memory cho các kernel
+// Version 1: Tập trung vào tối ưu memory cho các kernel
 #include "gpu_kernels_optimized_1.h"
 #include "gpu_kernels.h"
 #include <cuda_runtime.h>
@@ -15,14 +15,15 @@
         } \
     } while(0)
 
-#define TILE_SIZE 16
+// Tile size for shared memory
+#define TILE_SIZE 8
 
-// Sử dụng shared memory cho convolution ở giai đoạn forward
+// ==================== Shared Memory Optimized Convolution ====================
 __global__ void conv2d_shared_kernel(const float* input, float* output,
                                      const float* weights, const float* bias,
                                      int batch, int in_h, int in_w, int in_c,
                                      int out_c, int kernel_size, int stride, int padding) {
-    __shared__ float s[TILE_SIZE + 2][TILE_SIZE + 2][8]; 
+    __shared__ float tile[TILE_SIZE + 2][TILE_SIZE + 2][8];  // Tile with padding for 3x3 kernel
     
     int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
     int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
@@ -31,6 +32,7 @@ __global__ void conv2d_shared_kernel(const float* input, float* output,
     int ty = threadIdx.y;
     int tz = threadIdx.z;
     
+    // Flatten batch and output channel into single dimension
     int batch_oc = blockIdx.z;
     int b = batch_oc / out_c;
     int oc = batch_oc % out_c;
@@ -38,24 +40,23 @@ __global__ void conv2d_shared_kernel(const float* input, float* output,
     int out_x = blockIdx.x * TILE_SIZE + tx;
     int out_y = blockIdx.y * TILE_SIZE + ty;
     
-    // Sao chép input vào share memory
     if (out_x < out_w && out_y < out_h && oc < out_c && b < batch) {
-        // Lặp qua 8 kênh đầu tiên, lấy min để đảm bảo nếu input đầu vào < 8 
+        // Collaborative loading into shared memory
         for (int ic = tz; ic < min(8, in_c); ic += blockDim.z) {
             int in_x = out_x * stride - padding + tx;
             int in_y = out_y * stride - padding + ty;
             
             if (in_x >= 0 && in_x < in_w && in_y >= 0 && in_y < in_h) {
                 int in_idx = b * in_h * in_w * in_c + in_y * in_w * in_c + in_x * in_c + ic;
-                s[ty][tx][ic] = input[in_idx];
+                tile[ty][tx][ic] = input[in_idx];
             } else {
-                s[ty][tx][ic] = 0.0f;
+                tile[ty][tx][ic] = 0.0f;
             }
         }
-
+        
         __syncthreads();
         
-        // Tính toán sử dụng shared memory
+        // Compute convolution using shared memory
         float sum = bias[oc];
         
         for (int ic = 0; ic < min(8, in_c); ++ic) {
@@ -64,7 +65,7 @@ __global__ void conv2d_shared_kernel(const float* input, float* output,
                     if (ty + kh < TILE_SIZE + 2 && tx + kw < TILE_SIZE + 2) {
                         int w_idx = oc * in_c * kernel_size * kernel_size + 
                                    ic * kernel_size * kernel_size + kh * kernel_size + kw;
-                        sum += s[ty + kh][tx + kw][ic] * weights[w_idx];
+                        sum += tile[ty + kh][tx + kw][ic] * weights[w_idx];
                     }
                 }
             }
