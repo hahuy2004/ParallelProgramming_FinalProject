@@ -115,9 +115,6 @@ void AutoencoderGPU::initialize_weights() {
     
     // Allocate loss buffer
     CUDA_CHECK(cudaMalloc(&d_loss_, sizeof(float)));
-
-    // Allocate indices
-    CUDA_CHECK(cudaMalloc(&d_loss_, sizeof(float)));
     
     // Allocate gradient buffers for weights
     CUDA_CHECK(cudaMalloc(&d_grad_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3 * sizeof(float)));
@@ -372,8 +369,10 @@ void AutoencoderGPU::backward_gpu(int batch_size) {
                           batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
     
     // MaxPool1 backward: (32, 32, 256) <- (16, 16, 256)
-    launch_maxpool2d_backward(d_grad_pool1_out_, d_conv1_out_, d_indices1_, d_pool1_out_, d_indices1_,
-                             d_grad_conv1_out_, batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
+    launch_maxpool2d_backward(d_grad_pool1_out_, d_conv1_out_, d_indices1_, 
+                            d_pool1_out_, d_grad_conv1_out_, 
+                            batch_size, INPUT_H, INPUT_W, CONV1_FILTERS,
+                             2, 2);
     
     // ReLU1 backward
     launch_relu_backward(d_grad_conv1_out_, d_conv1_out_, d_grad_conv1_out_,
