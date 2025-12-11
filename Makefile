@@ -16,7 +16,7 @@ LIBSVM_DIR = third_party/libsvm
 NVCCFLAGS = -std=c++14 -O3 -use_fast_math -I$(INCLUDE_DIR) -I$(CUDA_DIR) -I$(LIBSVM_DIR)
 
 # CUDA architecture (adjust for your GPU)
-# Compute capability: 7.5 (RTX 2080, Tesla T4), 8.0 (A100), 8.6 (RTX 3090)
+# Compute capability: 7.5 (RTX 2080, Tesla T4)
 CUDA_ARCH = -arch=sm_75
 
 # CUDA libraries

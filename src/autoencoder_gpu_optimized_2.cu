@@ -20,9 +20,6 @@
 
 AutoencoderGPUOptimized2::AutoencoderGPUOptimized2() : current_batch_size_(0) {
     // Initialize all device pointers to nullptr
-    h_pinned_input_ = nullptr;
-    h_pinned_output_ = nullptr;
-    
     d_conv1_weights_ = nullptr;
     d_conv1_bias_ = nullptr;
     d_conv2_weights_ = nullptr;
@@ -73,9 +70,6 @@ AutoencoderGPUOptimized2::AutoencoderGPUOptimized2() : current_batch_size_(0) {
 
 AutoencoderGPUOptimized2::~AutoencoderGPUOptimized2() {
     free_device_memory();
-    
-    if (h_pinned_input_) cudaFreeHost(h_pinned_input_);
-    if (h_pinned_output_) cudaFreeHost(h_pinned_output_);
 }
 
 void AutoencoderGPUOptimized2::initialize_weights() {
@@ -128,7 +122,7 @@ void AutoencoderGPUOptimized2::initialize_weights() {
     CUDA_CHECK(cudaMalloc(&d_grad_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3 * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_grad_conv5_bias_, INPUT_C * sizeof(float)));
     
-    std::cout << "GPU Optimized weights initialized" << std::endl;
+    std::cout << "GPU weights initialized" << std::endl;
 }
 
 void AutoencoderGPUOptimized2::allocate_device_memory(int batch_size) {
@@ -156,9 +150,6 @@ void AutoencoderGPUOptimized2::allocate_device_memory(int batch_size) {
         cudaFree(d_grad_conv2_out_);
         cudaFree(d_grad_pool1_out_);
         cudaFree(d_grad_conv1_out_);
-        
-        if (h_pinned_input_) cudaFreeHost(h_pinned_input_);
-        if (h_pinned_output_) cudaFreeHost(h_pinned_output_);
     }
     
     current_batch_size_ = batch_size;
@@ -185,10 +176,6 @@ void AutoencoderGPUOptimized2::allocate_device_memory(int batch_size) {
     CUDA_CHECK(cudaMalloc(&d_grad_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_grad_pool1_out_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_grad_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float)));
-    
-    // Allocate pinned host memory for faster transfers
-    CUDA_CHECK(cudaMallocHost(&h_pinned_input_, batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float)));
-    CUDA_CHECK(cudaMallocHost(&h_pinned_output_, batch_size * LATENT_DIM * sizeof(float)));
 }
 
 void AutoencoderGPUOptimized2::free_device_memory() {
@@ -240,33 +227,33 @@ void AutoencoderGPUOptimized2::free_device_memory() {
 
 void AutoencoderGPUOptimized2::forward_gpu_optimized(int batch_size) {
     // Encoder with FUSED operations
-    // Conv1 + ReLU (fused): (32, 32, 3) -> (32, 32, 256)
-    launch_conv2d_relu_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
+    // Fused Conv2D + ReLU + Bias
+    launch_conv2d_relu_bias_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
                                batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
     
-    // MaxPool: (32, 32, 256) -> (16, 16, 256)
-    launch_maxpool2d_forward(d_conv1_out_, d_pool1_out_,
-                            batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
+    // MaxPool loop unrolling 
+    launch_maxpool2d_optimized_forward(d_conv1_out_, d_pool1_out_,
+                                batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
     
-    // Conv2 + ReLU (fused): (16, 16, 256) -> (16, 16, 128)
-    launch_conv2d_relu_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
-                               batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
+    // Fused Conv2D + ReLU + Bias
+    launch_conv2d_relu_bias_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
+                                batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
     
     // MaxPool: (16, 16, 128) -> (8, 8, 128)
-    launch_maxpool2d_forward(d_conv2_out_, d_pool2_out_,
-                            batch_size, 16, 16, CONV2_FILTERS, 2, 2);
+    launch_maxpool2d_optimized_forward(d_conv2_out_, d_pool2_out_,
+                                batch_size, 16, 16, CONV2_FILTERS, 2, 2);
     
     // Decoder
     // Conv3 + ReLU (fused): (8, 8, 128) -> (8, 8, 128)
-    launch_conv2d_relu_forward(d_pool2_out_, d_conv3_out_, d_conv3_weights_, d_conv3_bias_,
-                               batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
+    launch_conv2d_relu_bias_forward(d_pool2_out_, d_conv3_out_, d_conv3_weights_, d_conv3_bias_,
+                                batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
     
-    // Upsample: (8, 8, 128) -> (16, 16, 128)
+    // Upsample
     launch_upsample2d_forward(d_conv3_out_, d_up1_out_,
                              batch_size, LATENT_H, LATENT_W, LATENT_C, 2);
     
-    // Conv4 + ReLU (fused): (16, 16, 128) -> (16, 16, 256)
-    launch_conv2d_relu_forward(d_up1_out_, d_conv4_out_, d_conv4_weights_, d_conv4_bias_,
+    // Fused Conv2D + ReLU + Bias
+    launch_conv2d_relu_bias_forward(d_up1_out_, d_conv4_out_, d_conv4_weights_, d_conv4_bias_,
                                batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1);
     
     // Upsample: (16, 16, 256) -> (32, 32, 256)
@@ -340,7 +327,7 @@ void AutoencoderGPUOptimized2::backward_gpu_optimized(int batch_size) {
                             batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
     
     // MaxPool2 backward: (16, 16, 128) <- (8, 8, 128)
-    launch_maxpool2d_backward(d_grad_pool2_out_, d_conv2_out_, d_pool2_out_,
+    launch_maxpool2d_optimized_backward(d_grad_pool2_out_, d_conv2_out_, d_pool2_out_,
                             d_grad_conv2_out_, batch_size, 16, 16, CONV2_FILTERS, 2, 2);
     
     // ReLU2 backward (optimized)
@@ -353,7 +340,7 @@ void AutoencoderGPUOptimized2::backward_gpu_optimized(int batch_size) {
                             batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
     
     // MaxPool1 backward: (32, 32, 256) <- (16, 16, 256)
-    launch_maxpool2d_backward(d_grad_pool1_out_, d_conv1_out_, d_pool1_out_,
+    launch_maxpool2d_optimized_backward(d_grad_pool1_out_, d_conv1_out_, d_pool1_out_,
                             d_grad_conv1_out_, batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
     
     // ReLU1 backward (optimized)
@@ -400,7 +387,7 @@ void AutoencoderGPUOptimized2::train(const std::vector<float>& train_images,
                                      int batch_size,
                                      int epochs,
                                      float learning_rate) {
-    std::cout << "Training GPU Autoencoder (Optimized)..." << std::endl;
+    std::cout << "Training GPU Autoencoder (Kernel-Level Optimization)" << std::endl;
     std::cout << "Images: " << num_images << ", Batch size: " << batch_size 
               << ", Epochs: " << epochs << ", LR: " << learning_rate << std::endl;
     
@@ -433,14 +420,10 @@ void AutoencoderGPUOptimized2::train(const std::vector<float>& train_images,
             
             const float* batch_data = &train_images[start_idx * INPUT_H * INPUT_W * INPUT_C];
             
-            // Copy to pinned memory first
-            std::memcpy(h_pinned_input_, batch_data,
-                       actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float));
-            
-            // Async copy to device (faster with pinned memory)
-            CUDA_CHECK(cudaMemcpyAsync(d_input_, h_pinned_input_,
-                                      actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
-                                      cudaMemcpyHostToDevice));
+            // Copy input to device
+            CUDA_CHECK(cudaMemcpy(d_input_, batch_data,
+                                 actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
+                                 cudaMemcpyHostToDevice));
             
             // Forward pass
             forward_gpu_optimized(actual_batch_size);
@@ -487,7 +470,7 @@ void AutoencoderGPUOptimized2::extract_features(const std::vector<float>& images
                                                 std::vector<float>& features) {
     features.resize(num_images * LATENT_DIM);
     
-    int batch_size = 128;  // Larger batch size for optimized version
+    int batch_size = 64;  
     int num_batches = (num_images + batch_size - 1) / batch_size;
     
     auto start = std::chrono::high_resolution_clock::now();
@@ -503,37 +486,27 @@ void AutoencoderGPUOptimized2::extract_features(const std::vector<float>& images
         
         const float* batch_data = &images[start_idx * INPUT_H * INPUT_W * INPUT_C];
         
-        // Use pinned memory for faster transfer
-        std::memcpy(h_pinned_input_, batch_data,
-                   actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float));
+        // Copy input to device
+        CUDA_CHECK(cudaMemcpy(d_input_, batch_data,
+                             actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
+                             cudaMemcpyHostToDevice));
         
-        CUDA_CHECK(cudaMemcpyAsync(d_input_, h_pinned_input_,
-                                  actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
-                                  cudaMemcpyHostToDevice));
-        
-        // Run encoder only (fused operations)
         launch_conv2d_relu_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
                                    actual_batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
         
-        launch_maxpool2d_forward(d_conv1_out_, d_pool1_out_,
-                                actual_batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
+        launch_maxpool2d_optimized_forward(d_conv1_out_, d_pool1_out_,
+                                        actual_batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
         
         launch_conv2d_relu_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
                                    actual_batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
         
-        launch_maxpool2d_forward(d_conv2_out_, d_pool2_out_,
-                                actual_batch_size, 16, 16, CONV2_FILTERS, 2, 2);
+        launch_maxpool2d_optimized_forward(d_conv2_out_, d_pool2_out_,
+                                    actual_batch_size, 16, 16, CONV2_FILTERS, 2, 2);
         
-        // Async copy back using pinned memory
-        CUDA_CHECK(cudaMemcpyAsync(h_pinned_output_, d_pool2_out_,
-                                  actual_batch_size * LATENT_DIM * sizeof(float),
-                                  cudaMemcpyDeviceToHost));
-        
-        cudaDeviceSynchronize();
-        
-        std::memcpy(&features[start_idx * LATENT_DIM],
-                   h_pinned_output_,
-                   actual_batch_size * LATENT_DIM * sizeof(float));
+        CUDA_CHECK(cudaMemcpy(&features[start_idx * LATENT_DIM],
+                             d_pool2_out_,
+                             actual_batch_size * LATENT_DIM * sizeof(float),
+                             cudaMemcpyDeviceToHost));
     }
     
     auto end = std::chrono::high_resolution_clock::now();

@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
     }
     
     // GPU OPTIMIZED PHASE: Full training với 50000 ảnh, 20 epochs
-    int batch_size = 128;  // Larger batch size
+    int batch_size = 64;  
     int epochs = 20;  // Full 20 epochs 
     float learning_rate = 0.001f;
     
@@ -121,8 +121,6 @@ int main(int argc, char** argv) {
     std::cout << "Training features: (" << loader.get_train_size() << ", 8192)" << std::endl;
     std::cout << "Test features: (" << loader.get_test_size() << ", 8192)" << std::endl;
     std::cout << "Time: " << extract_time_2 << " seconds" << std::endl;
-    
-    
     
     std::cout << "\n=== Phase 3 Completed ===" << std::endl;
     std::cout << "Weights version 1 saved to: " << weights_path_1 << std::endl;
