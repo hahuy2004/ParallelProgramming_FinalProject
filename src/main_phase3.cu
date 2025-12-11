@@ -17,7 +17,7 @@ int main(int argc, char** argv) {
     
     // GPU OPTIMIZED PHASE: Full training với 50000 ảnh, 20 epochs
     int batch_size = 64;  
-    int epochs = 20;  // Full 20 epochs 
+    int epochs = 1;  // Full 20 epochs 
     float learning_rate = 0.001f;
     
     // Load CIFAR-10 dataset

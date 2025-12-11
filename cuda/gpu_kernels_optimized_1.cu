@@ -15,73 +15,85 @@
         } \
     } while(0)
 
+// Tile size for shared memory
+#define TILE_SIZE 16
+#define CH_TILE 8  // xử lý 8 kênh mỗi lần để giảm footprint shared
 
-// Sử dụng shared memory cho convolution ở giai đoạn forward
-__global__ void conv2d_forward_shared(const float* input, float* output,
+// ==================== Shared Memory Optimized Convolution ====================
+__global__ void conv2d_shared_kernel(const float* input, float* output,
                                      const float* weights, const float* bias,
                                      int batch, int in_h, int in_w, int in_c,
                                      int out_c, int kernel_size, int stride, int padding) {
-    extern __shared__ float s[]; 
+    // Tile kích thước 16x16 + halo cho kernel 3x3, xử lý 8 kênh mỗi lần
+    __shared__ float tile[TILE_SIZE + 2][TILE_SIZE + 2][CH_TILE];
     
     int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
     int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
     
-    int b = blockIdx.z;
-    int oc = blockIdx.y;
-    
     int tx = threadIdx.x;
     int ty = threadIdx.y;
+    int tz = threadIdx.z;
+    
+    // Flatten batch and output channel into single dimension
+    int batch_oc = blockIdx.z;
+    int b = batch_oc / out_c;
+    int oc = batch_oc % out_c;
+    
+    int out_x = blockIdx.x * TILE_SIZE + tx;
+    int out_y = blockIdx.y * TILE_SIZE + ty;
 
-    int oh0 = blockIdx.x / (out_w / blockDim.x) * blockDim.y;
-    int ow0 = blockIdx.x % (out_w / blockDim.x) * blockDim.x;
+    bool valid = (out_x < out_w && out_y < out_h && oc < out_c && b < batch);
 
-    int tile_h = blockDim.y + kernel_size - 1;
-    int tile_w = blockDim.x + kernel_size - 1;
+    // Lặp theo block kênh để xử lý toàn bộ in_c
+    float sum = valid ? bias[oc] : 0.0f;
 
-    // Tải input vào shared memory
-    for (int ic = 0; ic < in_c; ++ic) {
-        for (int th = ty; th < tile_h; th += blockDim.y) {
-            for (int tw = tx; tw < tile_w; tw += blockDim.x) {
+    // Tọa độ input gốc cho tile (bao gồm halo)
+    int in_x0 = blockIdx.x * TILE_SIZE * stride - padding;
+    int in_y0 = blockIdx.y * TILE_SIZE * stride - padding;
 
-                int ih = oh0 * stride - padding + th;
-                int iw = ow0 * stride - padding + tw;
+    for (int c_base = 0; c_base < in_c; c_base += CH_TILE) {
+        int c_lim = min(CH_TILE, in_c - c_base);
 
-                float val = 0.0f;
-                if (ih >= 0 && ih < in_h && iw >= 0 && iw < in_w) {
-                    int in_idx = b*in_h*in_w*in_c + ih*in_w*in_c + iw*in_c + ic;
-                    val = input[in_idx];
+        // Nạp tile vào shared (bao phủ halo)
+        for (int dy = ty; dy < TILE_SIZE + 2; dy += blockDim.y) {
+            for (int dx = tx; dx < TILE_SIZE + 2; dx += blockDim.x) {
+                int in_x = in_x0 + dx;
+                int in_y = in_y0 + dy;
+                if (in_x < 0 || in_x >= in_w || in_y < 0 || in_y >= in_h) {
+                    if (tz < c_lim) tile[dy][dx][tz] = 0.0f;
+                } else {
+                    for (int ic = tz; ic < c_lim; ic += blockDim.z) {
+                        int in_idx = b * in_h * in_w * in_c +
+                                     in_y * in_w * in_c +
+                                     in_x * in_c + (c_base + ic);
+                        tile[dy][dx][ic] = input[in_idx];
+                    }
                 }
-
-                s[ic * tile_h * tile_w + th * tile_w + tw] = val;
             }
         }
+
+        __syncthreads(); // đảm bảo tile đã đầy
+
+        if (valid) {
+            for (int ic = 0; ic < c_lim; ++ic) {
+                for (int kh = 0; kh < kernel_size; ++kh) {
+                    for (int kw = 0; kw < kernel_size; ++kw) {
+                        int sh_y = ty + kh;
+                        int sh_x = tx + kw;
+                        int w_idx = oc * in_c * kernel_size * kernel_size +
+                                    (c_base + ic) * kernel_size * kernel_size +
+                                    kh * kernel_size + kw;
+                        sum += tile[sh_y][sh_x][ic] * weights[w_idx];
+                    }
+                }
+            }
+        }
+
+        __syncthreads(); // an toàn trước khi ghi đè tile vòng kế
     }
 
-    __syncthreads();
-
-    // Tính output pixel
-    int oh = oh0 + ty;
-    int ow = ow0 + tx;
-
-    if (oh < out_h && ow < out_w) {
-
-        float sum = bias[oc];
-
-        for (int ic = 0; ic < in_c; ++ic) {
-            for (int kh = 0; kh < kernel_size; ++kh) {
-                for (int kw = 0; kw < kernel_size; ++kw) {
-
-                    int s_idx = ic * tile_h * tile_w + (ty + kh) * tile_w + (tx + kw);
-
-                    int w_idx = oc * in_c * kernel_size * kernel_size + ic * kernel_size * kernel_size +
-                                kh * kernel_size + kw;
-
-                    sum += s[s_idx] * weights[w_idx];
-                }
-            }
-        }
-
-        int out_idx = b * out_h * out_w * out_c + oh * out_w * out_c + ow * out_c + oc;
+    if (valid) {
+        int out_idx = b * out_h * out_w * out_c + out_y * out_w * out_c + out_x * out_c + oc;
         output[out_idx] = sum;
     }
 }
@@ -90,133 +102,100 @@ void launch_conv2d_shared_forward(const float* d_input, float* d_output,
                                    const float* d_weights, const float* d_bias,
                                    int batch, int in_h, int in_w, int in_c,
                                    int out_c, int kernel_size, int stride, int padding) {
-    // Mặc định block size
     int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
     int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
-    dim3 block(16, 16);
     
-    // Tính toán grid size
-    int grid_x = ((out_w + 16 - 1) / 16) * ((out_h + 16 - 1) / 16);
-    dim3 grid(grid_x, out_c, batch); 
+    dim3 block(TILE_SIZE, TILE_SIZE, 4);
+    dim3 grid((out_w + TILE_SIZE - 1) / TILE_SIZE,
+              (out_h + TILE_SIZE - 1) / TILE_SIZE,
+              batch * out_c);  // Flatten batch and out_c
     
-    // Tính kích thước shared memory
-    int tile_h = 16 + kernel_size - 1;
-    int tile_w = 16 + kernel_size - 1;
-    int shmem_bytes = tile_h * tile_w * in_c * sizeof(float);
-
-    conv2d_forward_shared<<<grid, block, shmem_bytes>>>(
+    conv2d_shared_kernel<<<grid, block>>>(
         d_input, d_output, d_weights, d_bias,
         batch, in_h, in_w, in_c, out_c, kernel_size, stride, padding);
-
     
     CUDA_CHECK(cudaGetLastError());
 }
 
-// Sử dụng shared memory cho giai đoạn backward
-__global__ void conv2d_shared_backward(const float* grad_output, const float* input,
-                                        const float* weights, float* grad_input,
-                                        float* grad_weights, float* grad_bias,
-                                        int batch, int in_h, int in_w, int in_c,
-                                        int out_c, int kernel_size, int stride, int padding) {
+// Optimized Conv2D Backward with Shared Memory
+__global__ void conv2d_shared_backward_kernel(const float* grad_output, const float* input,
+                                              const float* weights, float* grad_input,
+                                              float* grad_weights, float* grad_bias,
+                                              int batch, int in_h, int in_w, int in_c,
+                                              int out_c, int kernel_size, int stride, int padding) {
+    __shared__ float tile_input[TILE_SIZE + 2][TILE_SIZE + 2][CH_TILE];
     
-    extern __shared__ float s[];
-
     int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
     int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
-
-    int b = blockIdx.z;  
-    int oc = blockIdx.y;
-
+    
     int tx = threadIdx.x;
     int ty = threadIdx.y;
+    int tz = threadIdx.z;
+    
+    int batch_oc = blockIdx.z;
+    int b = batch_oc / out_c;
+    int oc = batch_oc % out_c;
+    
+    int out_x = blockIdx.x * TILE_SIZE + tx;
+    int out_y = blockIdx.y * TILE_SIZE + ty;
 
-    int oh0 = blockIdx.x / (out_w / blockDim.x) * blockDim.y;
-    int ow0 = blockIdx.x % (out_w / blockDim.x) * blockDim.x;
-
-    int tile_h = blockDim.y + kernel_size - 1;
-    int tile_w = blockDim.x + kernel_size - 1;
-
-
-    for (int ic = 0; ic < in_c; ++ic)
-    {
-        for (int th = ty; th < tile_h; th += blockDim.y)
-        {
-            for (int tw = tx; tw < tile_w; tw += blockDim.x)
-            {
-                int ih = oh0 * stride - padding + th;
-                int iw = ow0 * stride - padding + tw;
-
-                float val = 0.0f;
-                if (ih >= 0 && ih < in_h && iw >= 0 && iw < in_w)
-                {
-                    int in_idx =
-                        b * in_h * in_w * in_c +
-                        ih * in_w * in_c +
-                        iw * in_c + ic;
-
-                    val = input[in_idx];
-                }
-
-                s[ic * tile_h * tile_w + th * tile_w + tw] = val;
-            }
+    bool valid = (out_x < out_w && out_y < out_h && oc < out_c && b < batch);
+    float grad_out_val = 0.0f;
+    if (valid) {
+        int out_idx = b * out_h * out_w * out_c + out_y * out_w * out_c + out_x * out_c + oc;
+        grad_out_val = grad_output[out_idx];
+        if (tx == 0 && ty == 0) {
+            atomicAdd(&grad_bias[oc], grad_out_val);
         }
     }
 
-    __syncthreads();
+    int in_x0 = blockIdx.x * TILE_SIZE * stride - padding;
+    int in_y0 = blockIdx.y * TILE_SIZE * stride - padding;
 
+    for (int c_base = 0; c_base < in_c; c_base += CH_TILE) {
+        int c_lim = min(CH_TILE, in_c - c_base);
 
-    int oh = oh0 + ty;
-    int ow = ow0 + tx;
-
-    if (oh >= out_h || ow >= out_w)
-        return;
-
-    // grad_output tại vị trí output này
-    int go_idx = b * out_h * out_w * out_c + oh * out_w * out_c + ow * out_c + oc;
-
-    float go_val = grad_output[go_idx];
-
-    // bias
-    if (tx == 0 && ty == 0)
-        atomicAdd(&grad_bias[oc], go_val);
-
-    for (int ic = 0; ic < in_c; ++ic)
-    {
-        for (int kh = 0; kh < kernel_size; ++kh)
-        {
-            for (int kw = 0; kw < kernel_size; ++kw)
-            {
-                int tile_y = ty + kh;
-                int tile_x = tx + kw;
-
-                float v = 0.0f;
-
-                if (tile_y < tile_h && tile_x < tile_w)
-                {
-                    int s_idx =
-                        ic * tile_h * tile_w +
-                        tile_y * tile_w + tile_x;
-
-                    v = s[s_idx];
-                }
-
-                // gradient weights
-                int w_idx = oc * in_c * kernel_size * kernel_size + ic * kernel_size * kernel_size + kh * kernel_size + kw;
-
-                atomicAdd(&grad_weights[w_idx], v * go_val);
-
-                // gradient input
-                int ih = oh * stride - padding + kh;
-                int iw = ow * stride - padding + kw;
-
-                if (ih >= 0 && ih < in_h && iw >= 0 && iw < in_w)
-                {
-                    int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + ic;
-
-                    atomicAdd(&grad_input[in_idx], weights[w_idx] * go_val);
+        // load input tile
+        for (int dy = ty; dy < TILE_SIZE + 2; dy += blockDim.y) {
+            for (int dx = tx; dx < TILE_SIZE + 2; dx += blockDim.x) {
+                int in_x = in_x0 + dx;
+                int in_y = in_y0 + dy;
+                if (in_x < 0 || in_x >= in_w || in_y < 0 || in_y >= in_h) {
+                    if (tz < c_lim) tile_input[dy][dx][tz] = 0.0f;
+                } else {
+                    for (int ic = tz; ic < c_lim; ic += blockDim.z) {
+                        int in_idx = b * in_h * in_w * in_c +
+                                     in_y * in_w * in_c +
+                                     in_x * in_c + (c_base + ic);
+                        tile_input[dy][dx][ic] = input[in_idx];
+                    }
                 }
             }
         }
+
+        __syncthreads();
+
+        if (valid) {
+            for (int ic = 0; ic < c_lim; ++ic) {
+                for (int kh = 0; kh < kernel_size; ++kh) {
+                    for (int kw = 0; kw < kernel_size; ++kw) {
+                        int ih = out_y * stride - padding + kh;
+                        int iw = out_x * stride - padding + kw;
+                        if (ih >= 0 && ih < in_h && iw >= 0 && iw < in_w) {
+                            int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + (c_base + ic);
+                            int w_idx = oc * in_c * kernel_size * kernel_size +
+                                        (c_base + ic) * kernel_size * kernel_size +
+                                        kh * kernel_size + kw;
+
+                            atomicAdd(&grad_weights[w_idx], tile_input[ty + kh][tx + kw][ic] * grad_out_val);
+                            atomicAdd(&grad_input[in_idx], weights[w_idx] * grad_out_val);
+                        }
+                    }
+                }
+            }
+        }
+
+        __syncthreads();
     }
 }
 
@@ -227,21 +206,17 @@ void launch_conv2d_shared_backward(const float* d_grad_output, const float* d_in
                                    int out_c, int kernel_size, int stride, int padding) {
     int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
     int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
-    dim3 block(16, 16);
-
-    int grid_x = ((out_w + 16 - 1) / 16) * ((out_h + 16 - 1) / 16);
-    dim3 grid(grid_x, out_c, batch);
     
-    int tile_h = 16 + kernel_size - 1;
-    int tile_w = 16 + kernel_size - 1;
-    int shmem_bytes = tile_h * tile_w * in_c * sizeof(float);
-
-    conv2d_shared_backward<<<grid, block, shmem_bytes>>>(
-        d_input, d_grad_output, d_weights,
-        d_grad_input, d_grad_weights, d_grad_bias,
-        batch, in_h, in_w, in_c,
-        out_c, kernel_size, stride, padding
-    );
-
+    dim3 block(TILE_SIZE, TILE_SIZE, 4);
+    dim3 grid((out_w + TILE_SIZE - 1) / TILE_SIZE,
+              (out_h + TILE_SIZE - 1) / TILE_SIZE,
+              batch * out_c);
+    
+    conv2d_shared_backward_kernel<<<grid, block>>>(
+        d_grad_output, d_input, d_weights, d_grad_input,
+        d_grad_weights, d_grad_bias,
+        batch, in_h, in_w, in_c, out_c, kernel_size, stride, padding);
+    
     CUDA_CHECK(cudaGetLastError());
 }
+

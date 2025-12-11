@@ -271,8 +271,8 @@ float AutoencoderGPUOptimized2::compute_loss_gpu(int batch_size) {
     
     float h_loss;
     CUDA_CHECK(cudaMemcpy(&h_loss, d_loss_, sizeof(float), cudaMemcpyDeviceToHost));
-    print("h_loss: %f", h_loss);
-    print("size: %f", size);
+    printf("h_loss: %f\n", h_loss);
+    printf("size: %d\n", size);
     return h_loss / size;
 }
 
@@ -440,7 +440,7 @@ void AutoencoderGPUOptimized2::train(const std::vector<float>& train_images,
             
             // Compute loss
             float loss = compute_loss_gpu(actual_batch_size);
-            printf("Loss:%f", loss);
+            printf("Loss:%f\n", loss);
             epoch_loss += loss;
             
             // Backward pass (optimized)
