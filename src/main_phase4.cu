@@ -1,7 +1,8 @@
 #include "../include/cifar10_loader.h"
 #include "../include/autoencoder_cpu.h"
 #include "../include/autoencoder_gpu.h"
-#include "../include/autoencoder_gpu_optimized.h"
+#include "../include/autoencoder_gpu_optimized_1.h"
+#include "../include/autoencoder_gpu_optimized_2.h"
 #include "../include/svm_classifier.h"
 #include <iostream>
 #include <chrono>
@@ -47,7 +48,7 @@ int main(int argc, char** argv) {
     
     // Configuration
     std::string data_dir = "cifar-10-batches-bin";
-    std::string mode = "optimized";  // Default: optimized GPU
+    std::string mode = "optimized_1";  // Default: optimized_1 GPU
     
     // Parse arguments
     for (int i = 1; i < argc; ++i) {
@@ -65,10 +66,10 @@ int main(int argc, char** argv) {
     }
     
     // Validate mode
-    if (mode != "cpu" && mode != "naive" && mode != "optimized") {
+    if (mode != "cpu" && mode != "naive" && mode != "optimized_1" && mode != "optimized_2") {
         std::cerr << "Invalid mode: " << mode << std::endl;
-        std::cerr << "Usage: " << argv[0] << " [data_dir] [--mode cpu|naive|optimized]" << std::endl;
-        std::cerr << "Default mode: optimized" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " [data_dir] [--mode cpu|naive|optimized_1|optimized_2]" << std::endl;
+        std::cerr << "Default mode: optimized_1" << std::endl;
         return 1;
     }
     
@@ -138,10 +139,25 @@ int main(int argc, char** argv) {
         autoencoder.extract_features(loader.get_test_images(),
                                     num_test_samples,
                                     test_features);
-    } else {  // optimized
-        std::cout << "Using Optimized GPU Autoencoder" << std::endl;
-        AutoencoderGPUOptimized autoencoder;
-        std::string weights_path = "weights/autoencoder_gpu_optimized.weights";
+    } else if (mode == "optimized_1") {
+        std::cout << "Using Optimized GPU Autoencoder v1" << std::endl;
+        AutoencoderGPUOptimized1 autoencoder;
+        std::string weights_path = "weights/autoencoder_gpu_optimized_1.weights";
+        autoencoder.load_weights(weights_path);
+        
+        std::cout << "Extracting training features..." << std::endl;
+        autoencoder.extract_features(loader.get_train_images(), 
+                                    num_train_samples, 
+                                    train_features);
+        
+        std::cout << "Extracting test features..." << std::endl;
+        autoencoder.extract_features(loader.get_test_images(),
+                                    num_test_samples,
+                                    test_features);
+    } else {  // optimized_2
+        std::cout << "Using Optimized GPU Autoencoder v2" << std::endl;
+        AutoencoderGPUOptimized2 autoencoder;
+        std::string weights_path = "weights/autoencoder_gpu_optimized_2.weights";
         autoencoder.load_weights(weights_path);
         
         std::cout << "Extracting training features..." << std::endl;
@@ -188,7 +204,8 @@ int main(int argc, char** argv) {
     // Save SVM model
     std::string svm_model_path = (mode == "cpu") ? "weights/svm_model_cpu.model" : 
                                   (mode == "naive") ? "weights/svm_model_naive.model" :
-                                  "weights/svm_model_optimized.model";
+                                  (mode == "optimized_1") ? "weights/svm_model_optimized_1.model" :
+                                  "weights/svm_model_optimized_2.model";
     svm.save_model(svm_model_path);
     
     // Predict on test set
