@@ -16,9 +16,10 @@ int main(int argc, char** argv) {
     }
     
     // GPU OPTIMIZED PHASE: Full training với 50000 ảnh, 20 epochs
-    int batch_size = 64;  
-    int epochs = 1;  // Full 20 epochs 
+    int batch_size = 32;  
+    int epochs = 4;  // Change to 20 for full training
     float learning_rate = 0.001f;
+    int num_train_images = 128; // Change to 50000 for full training
     
     // Load CIFAR-10 dataset
     std::cout << "\n=== Loading CIFAR-10 Dataset ===" << std::endl;
@@ -38,35 +39,21 @@ int main(int argc, char** argv) {
     std::cout << "\n=== Training GPU Autoencoder (optimized) ===" << std::endl;
     std::cout << "Full training with " << loader.get_train_size() 
               << " images, " << epochs << " epochs" << std::endl;
-    
+    std::cout << "Expected time: ~" << (loader.get_train_size() * epochs / 1024 * 77.5 / 60) 
+              << " minutes (estimated from test runs)" << std::endl;
     //---------------------Memory Optimization---------------------
     AutoencoderGPUOptimized1 autoencoder_ver_1;
     
     auto train_start_1 = std::chrono::high_resolution_clock::now();
     
     autoencoder_ver_1.train(train_images,
-                     loader.get_train_size(),
+                     num_train_images,
                      batch_size,
                      epochs,
                      learning_rate);
     
     auto train_end_1 = std::chrono::high_resolution_clock::now();
     float train_time_1 = std::chrono::duration<float>(train_end_1 - train_start_1).count();
-    
-    //---------------------Kernel-Level Optimization---------------------
-    AutoencoderGPUOptimized2 autoencoder_ver_2;
-    
-    auto train_start_2 = std::chrono::high_resolution_clock::now();
-    
-    autoencoder_ver_2.train(train_images,
-                     loader.get_train_size(),
-                     batch_size,
-                     epochs,
-                     learning_rate);
-    
-    auto train_end_2 = std::chrono::high_resolution_clock::now();
-    float train_time_2 = std::chrono::duration<float>(train_end_2 - train_start_2).count();
-
 
     //--------------------------Thống kê Version 1-------------------------------------------------
     std::cout << "\n=== Training Version 1 Summary ===" << std::endl;
@@ -95,6 +82,22 @@ int main(int argc, char** argv) {
     std::cout << "Test features: (" << loader.get_test_size() << ", 8192)" << std::endl;
     std::cout << "Time: " << extract_time_1 << " seconds" << std::endl;
     
+    
+    //---------------------Kernel-Level Optimization---------------------
+    AutoencoderGPUOptimized2 autoencoder_ver_2;
+    
+    auto train_start_2 = std::chrono::high_resolution_clock::now();
+    
+    autoencoder_ver_2.train(train_images,
+                     loader.get_train_size(),
+                     batch_size,
+                     epochs,
+                     learning_rate);
+    
+    auto train_end_2 = std::chrono::high_resolution_clock::now();
+    float train_time_2 = std::chrono::duration<float>(train_end_2 - train_start_2).count();
+
+
     //--------------------------Thống kê Version 2-------------------------------------------------
     std::cout << "\n=== Training Version 2 Summary ===" << std::endl;
     std::cout << "Total training time version 2: " << train_time_2 << " seconds" << std::endl;

@@ -297,16 +297,8 @@ void AutoencoderGPUOptimized2::backward_gpu_optimized(int batch_size) {
     launch_zero_grad(d_grad_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3);
     launch_zero_grad(d_grad_conv5_bias_, INPUT_C);
     
-    launch_zero_grad(d_grad_conv5_out_, batch_size * INPUT_H * INPUT_W * INPUT_C);
     launch_zero_grad(d_grad_up2_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-    launch_zero_grad(d_grad_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS);
-    launch_zero_grad(d_grad_up1_out_, batch_size * 16 * 16 * LATENT_C);
-    launch_zero_grad(d_grad_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
-    launch_zero_grad(d_grad_pool2_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
-    launch_zero_grad(d_grad_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS);
-    launch_zero_grad(d_grad_pool1_out_, batch_size * 16 * 16 * CONV1_FILTERS);
-    launch_zero_grad(d_grad_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-    
+
     launch_mse_loss_backward(d_conv5_out_, d_input_, d_grad_conv5_out_, size);
     
     launch_conv2d_optimized_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_,
@@ -419,6 +411,11 @@ void AutoencoderGPUOptimized2::train(const std::vector<float>& train_images,
         cudaEventRecord(epoch_start);
         
         float epoch_loss = 0.0f;
+
+        int log_interval = (num_batches > 100) ? 1 : std::max(1, num_batches / 10);
+        
+        std::cout << "Epoch [" << (epoch + 1) << "/" << epochs << "]" << std::endl;
+
         
         for (int batch = 0; batch < num_batches; ++batch) {
             int start_idx = batch * batch_size;
@@ -448,6 +445,13 @@ void AutoencoderGPUOptimized2::train(const std::vector<float>& train_images,
             
             // Update weights
             update_weights_gpu(learning_rate, actual_batch_size);
+            
+            if ((batch + 1) % log_interval == 0 || batch == num_batches - 1) {
+                float avg_loss = epoch_loss / (batch + 1);
+                float progress = 100.0f * (batch + 1) / num_batches;
+                std::cout << "  Batch [" << (batch + 1) << "/" << num_batches << "] "
+                          << "Avg Loss: " << avg_loss << std::endl;
+            }
         }
         
         cudaEventRecord(epoch_stop);
