@@ -19,11 +19,9 @@
 // Fused Conv2D + ReLU + Bias
 __global__ void conv2d_relu_bias_kernel(const float* input, float* output,
                                         const float* weights, const float* bias,
-                                        int batch, int in_h, int in_w, int in_c,
+                                        int batch, int in_h, int in_w, int in_c, int out_h, int out_w,
                                         int out_c, int kernel_size, int stride, int padding) {
-    int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
-    int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
-    
+
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int total = batch * out_h * out_w * out_c;
     
@@ -72,17 +70,15 @@ void launch_conv2d_relu_bias_forward(const float* d_input, float* d_output,
     
     conv2d_relu_bias_kernel<<<grid_size, block_size>>>(
         d_input, d_output, d_weights, d_bias,
-        batch, in_h, in_w, in_c, out_c, kernel_size, stride, padding);
+        batch, in_h, in_w, in_c, out_h, out_w, out_c, kernel_size, stride, padding);
     
     CUDA_CHECK(cudaGetLastError());
 }
 
 // Hàm này áp dụng cho pool size = 2 theo đề bài quy định
 __global__ void maxpool2d_forward_optimized_kernel(const float* input, float* output, float* indices,
-                                        int batch, int h, int w, int c,
+                                        int batch, int h, int w, int c, int out_h, int out_w,
                                         int pool_size, int stride) {
-    int out_h = (h - pool_size) / stride + 1;
-    int out_w = (w - pool_size) / stride + 1;
 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int total = batch * out_h * out_w * c;
@@ -159,7 +155,7 @@ void launch_maxpool2d_optimized_forward(const float* d_input, float* d_output, f
     int grid_size = (total + block_size - 1) / block_size;
 
     maxpool2d_forward_optimized_kernel<<<grid_size, block_size>>>(
-    d_input, d_output, indices, batch, h, w, c, pool_size, stride);
+    d_input, d_output, indices, batch, h, w, c, out_h, out_w, pool_size, stride);
 
     CUDA_CHECK(cudaGetLastError());
 }
