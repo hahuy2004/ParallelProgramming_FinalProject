@@ -16,7 +16,7 @@
 
 // Forward
 // Fused Cov2d + Relu + Bias 
-__global__ void conv2d_forward_relu_fused(const float* input, float* output,
+__global__ void conv2d_forward_relu_fused2(const float* input, float* output,
                                           const float* weights, const float* bias,
                                           int batch, int in_h, int in_w, int in_c, int out_h, int out_w,
                                           int out_c, int kernel_size, int stride, int padding) {
@@ -68,14 +68,14 @@ void launch_conv2d_forward_relu_fused2(const float* d_input, float* d_output,
     int block_size = 256;
     int grid_size = (total + block_size - 1) / block_size;
     
-    conv2d_forward_relu_fused<<<grid_size, block_size, 0, stream>>>(
+    conv2d_forward_relu_fused2<<<grid_size, block_size, 0, stream>>>(
         d_input, d_output, d_weights, d_bias,
         batch, in_h, in_w, in_c, out_h, out_w, out_c, kernel_size, stride, padding);
     
     CUDA_CHECK(cudaGetLastError());
 }
 
-__global__ void conv2d_forward_kernel(const float* input, float* output,
+__global__ void conv2d_forward_kernel2(const float* input, float* output,
                                       const float* weights, const float* bias,
                                       int batch, int in_h, int in_w, int in_c,
                                       int out_c, int kernel_size, int stride, int padding) {
@@ -124,7 +124,7 @@ void launch_conv2d_forward2(const float* d_input, float* d_output,
     int block_size = 256;
     int grid_size = (total + block_size - 1) / block_size;
     
-    conv2d_forward_kernel<<<grid_size, block_size,0, stream>>>(
+    conv2d_forward_kernel2<<<grid_size, block_size,0, stream>>>(
         d_input, d_output, d_weights, d_bias,
         batch, in_h, in_w, in_c, out_c, kernel_size, stride, padding);
     
@@ -132,7 +132,7 @@ void launch_conv2d_forward2(const float* d_input, float* d_output,
 }
 
 // Hàm này áp dụng cho pool size = 2 theo đề bài quy định
-__global__ void maxpool2d_forward_optimized_kernel(const float* input, float* output, float* indices,
+__global__ void maxpool2d_forward_optimized_kernel2(const float* input, float* output, float* indices,
                                         int batch, int h, int w, int c,
                                         int pool_size, int stride) {
     int out_h = (h - pool_size) / stride + 1;
@@ -212,13 +212,13 @@ void launch_maxpool2d_optimized_forward2(const float* d_input, float* d_output, 
     int block_size = 256;
     int grid_size = (total + block_size - 1) / block_size;
 
-    maxpool2d_forward_optimized_kernel<<<grid_size, block_size, 0, stream>>>(
+    maxpool2d_forward_optimized_kernel2<<<grid_size, block_size, 0, stream>>>(
     d_input, d_output, indices, batch, h, w, c, pool_size, stride);
 
     CUDA_CHECK(cudaGetLastError());
 }
 
-__global__ void upsample2d_forward_kernel(const float* input, float* output,
+__global__ void upsample2d_forward_kernel2(const float* input, float* output,
                                           int batch, int in_h, int in_w, int c, int out_h, int out_w,
                                           int scale_factor) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -248,7 +248,7 @@ void launch_upsample2d_forward2(const float* d_input, float* d_output,
     int block_size = 256;
     int grid_size = (total + block_size - 1) / block_size;
     
-    upsample2d_forward_kernel<<<grid_size, block_size, 0, stream>>>(
+    upsample2d_forward_kernel2<<<grid_size, block_size, 0, stream>>>(
         d_input, d_output, batch, in_h, in_w, c, out_h, out_w, scale_factor);
     
     CUDA_CHECK(cudaGetLastError());
@@ -259,7 +259,7 @@ void launch_upsample2d_forward2(const float* d_input, float* d_output,
 // Backward
 // Fused kernel: Compute grad_bias, grad_weights, and grad_input in one pass
 // with loop unrolling for kernel_size=3
-__global__ void conv2d_relu_backward_kernel_fused(const float* grad_output, 
+__global__ void conv2d_relu_backward_kernel_fused2(const float* grad_output, 
                                                    const float* input,
                                                    const float* weights, 
                                                    const float* conv_output, 
@@ -326,7 +326,7 @@ void launch_conv2d_relu_backward_fused2(const float* d_grad_output,
     int block_size = 256;
     int grid_size = (total + block_size - 1) / block_size;
     
-    conv2d_relu_backward_kernel_fused<<<grid_size, block_size, 0, stream>>>(
+    conv2d_relu_backward_kernel_fused2<<<grid_size, block_size, 0, stream>>>(
         d_grad_output, d_input, d_weights, d_conv_output, d_grad_input,
         d_grad_weights, d_grad_bias,
         batch, in_h, in_w, in_c, out_h, out_w, out_c, kernel_size, stride, padding);
@@ -335,7 +335,7 @@ void launch_conv2d_relu_backward_fused2(const float* d_grad_output,
 }
 
 
-__global__ void conv2d_backward_kernel(const float* grad_output, const float* input,
+__global__ void conv2d_backward_kernel2(const float* grad_output, const float* input,
                                        const float* weights, float* grad_input,
                                        float* grad_weights, float* grad_bias,
                                        int batch, int in_h, int in_w, int in_c, int out_h, int out_w,
@@ -390,7 +390,7 @@ void launch_conv2d_backward2(const float* d_grad_output, const float* d_input,
     int block_size = 256;
     int grid_size = (total + block_size - 1) / block_size;
     
-    conv2d_backward_kernel<<<grid_size, block_size, 0, stream>>>(
+    conv2d_backward_kernel2<<<grid_size, block_size, 0, stream>>>(
         d_grad_output, d_input, d_weights, d_grad_input,
         d_grad_weights, d_grad_bias,
         batch, in_h, in_w, in_c, out_h, out_w, out_c, kernel_size, stride, padding);
@@ -399,7 +399,7 @@ void launch_conv2d_backward2(const float* d_grad_output, const float* d_input,
 }
 
 // MaxPool2D Backward: route gradient to the max location
-__global__ void maxpool2d_backward_kernel(const float* grad_output, const float* indices,
+__global__ void maxpool2d_backward_kernel2(const float* grad_output, const float* indices,
                                           float* grad_input, int total) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < total) {
@@ -419,7 +419,7 @@ void launch_maxpool2d_backward2(const float* d_grad_output, float* d_input, cons
     int block_size = 256;
     int grid_size = (total + block_size - 1) / block_size;
     
-    maxpool2d_backward_kernel<<<grid_size, block_size, 0, stream>>>(
+    maxpool2d_backward_kernel2<<<grid_size, block_size, 0, stream>>>(
         d_grad_output, indices, d_grad_input, total);
     
     CUDA_CHECK(cudaGetLastError());
@@ -427,7 +427,7 @@ void launch_maxpool2d_backward2(const float* d_grad_output, float* d_input, cons
 
 
 // UpSample2D Backward
-__global__ void upsample2d_backward_kernel(const float* grad_output, float* grad_input,
+__global__ void upsample2d_backward_kernel2(const float* grad_output, float* grad_input,
                                            int batch, int in_h, int in_w, int c, int out_h, int out_w,
                                            int scale_factor) {  
 
@@ -468,7 +468,7 @@ void launch_upsample2d_backward2(const float* d_grad_output, float* d_grad_input
 //=====================================================
 // Untility
 // Forward
-__global__ void mse_loss_kernel(const float* input, const float* output,
+__global__ void mse_loss_kernel2(const float* input, const float* output,
                                 float* partial_sums, int size) {
     __shared__ float shared_sum[256];
     
@@ -505,11 +505,11 @@ void launch_mse_loss2(const float* d_input, const float* d_output,
     int block_size = 256;
     int grid_size = (size + block_size - 1) / block_size;
     
-    mse_loss_kernel<<<grid_size, block_size, 0, stream>>>(d_input, d_output, d_loss, size);
+    mse_loss_kernel2<<<grid_size, block_size, 0, stream>>>(d_input, d_output, d_loss, size);
     CUDA_CHECK(cudaGetLastError());
 }
 
-__global__ void zero_grad_kernel(float* grad, int size) {
+__global__ void zero_grad_kernel2(float* grad, int size) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < size) {
         grad[idx] = 0.0f;
@@ -522,11 +522,11 @@ void launch_zero_grad2(float* d_grad, int size, cudaStream_t stream) {
     int block_size = 256;
     int grid_size = (size + block_size - 1) / block_size;
     
-    zero_grad_kernel<<<grid_size, block_size, 0, stream>>>(d_grad, size);
+    zero_grad_kernel2<<<grid_size, block_size, 0, stream>>>(d_grad, size);
     CUDA_CHECK(cudaGetLastError());
 }
 
-__global__ void sgd_update_kernel(float* weights, const float* grad,
+__global__ void sgd_update_kernel2(float* weights, const float* grad,
                                   float learning_rate, int size) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < size) {
@@ -539,12 +539,12 @@ void launch_sgd_update2(float* d_weights, const float* d_grad,
     int block_size = 256;
     int grid_size = (size + block_size - 1) / block_size;
     
-    sgd_update_kernel<<<grid_size, block_size, 0, stream>>>(d_weights, d_grad, learning_rate, size);
+    sgd_update_kernel2<<<grid_size, block_size, 0, stream>>>(d_weights, d_grad, learning_rate, size);
     CUDA_CHECK(cudaGetLastError());
 }
 
 // MSE Loss Backward: compute gradient of loss w.r.t. output
-__global__ void mse_loss_backward_kernel(const float* output, const float* target,
+__global__ void mse_loss_backward_kernel2(const float* output, const float* target,
                                          float* grad_output, int size) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < size) {
@@ -557,7 +557,7 @@ void launch_mse_loss_backward2(const float* d_output, const float* d_target,
     int block_size = 256;
     int grid_size = (size + block_size - 1) / block_size;
     
-    mse_loss_backward_kernel<<<grid_size, block_size, 0, stream>>>(d_output, d_target, d_grad_output, size);
+    mse_loss_backward_kernel2<<<grid_size, block_size, 0, stream>>>(d_output, d_target, d_grad_output, size);
     CUDA_CHECK(cudaGetLastError());
 }
 
