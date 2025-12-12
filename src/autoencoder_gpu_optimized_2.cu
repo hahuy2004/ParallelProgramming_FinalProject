@@ -285,7 +285,7 @@ float AutoencoderGPUOptimized2::compute_loss_gpu(int batch_size) {
 void AutoencoderGPUOptimized2::backward_gpu_optimized(int batch_size) {
     int size = batch_size * INPUT_H * INPUT_W * INPUT_C;
     
-    // Zero out all gradients
+    // Zero out all gradients for weights and biases
     launch_zero_grad(d_grad_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3);
     launch_zero_grad(d_grad_conv1_bias_, CONV1_FILTERS);
     launch_zero_grad(d_grad_conv2_weights_, CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
@@ -297,6 +297,7 @@ void AutoencoderGPUOptimized2::backward_gpu_optimized(int batch_size) {
     launch_zero_grad(d_grad_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3);
     launch_zero_grad(d_grad_conv5_bias_, INPUT_C);
     
+    // Zero out activation gradients
     launch_zero_grad(d_grad_conv5_out_, batch_size * INPUT_H * INPUT_W * INPUT_C);
     launch_zero_grad(d_grad_up2_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
     launch_zero_grad(d_grad_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS);
@@ -306,68 +307,90 @@ void AutoencoderGPUOptimized2::backward_gpu_optimized(int batch_size) {
     launch_zero_grad(d_grad_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS);
     launch_zero_grad(d_grad_pool1_out_, batch_size * 16 * 16 * CONV1_FILTERS);
     launch_zero_grad(d_grad_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-
+    
+    // Compute gradient of loss w.r.t. output
     launch_mse_loss_backward(d_conv5_out_, d_input_, d_grad_conv5_out_, size);
     
-    launch_conv2d_optimized_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_,
-                            d_grad_up2_out_, d_grad_conv5_weights_, d_grad_conv5_bias_,
-                            batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
-
+    // Backward through decoder
+    // Conv5 backward: (32, 32, 3) <- (32, 32, 256)
+    launch_conv2d_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_, 
+                          d_grad_up2_out_, d_grad_conv5_weights_, d_grad_conv5_bias_,
+                          batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
+    
+    // Upsample2 backward: (16, 16, 256) <- (32, 32, 256)
     launch_upsample2d_backward(d_grad_up2_out_, d_grad_conv4_out_,
-                                        batch_size, 16, 16, CONV1_FILTERS, 2);
+                              batch_size, 16, 16, CONV1_FILTERS, 2);
     
-    launch_relu_backward_optimized(d_grad_conv4_out_, d_conv4_out_, d_grad_conv4_out_,
-                                   batch_size * 16 * 16 * CONV1_FILTERS);
-    
-    // Conv4 backward: (16, 16, 128) <- (16, 16, 256)
-    launch_conv2d_optimized_backward(d_grad_conv4_out_, d_up1_out_, d_conv4_weights_,
-                            d_grad_up1_out_, d_grad_conv4_weights_, d_grad_conv4_bias_,
-                            batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1);
+    // FUSED: Conv4 + ReLU4 backward: (16, 16, 128) <- (16, 16, 256)
+    // Replaces: ReLU4_backward + Conv4_backward (2 kernels → 1 kernel)
+    launch_conv2d_relu_backward_fused(
+        d_grad_conv4_out_,          
+        d_up1_out_,                 
+        d_conv4_weights_,         
+        d_conv4_out_,               
+        d_grad_up1_out_,           
+        d_grad_conv4_weights_,     
+        d_grad_conv4_bias_,     
+        batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1
+    );
     
     // Upsample1 backward: (8, 8, 128) <- (16, 16, 128)
     launch_upsample2d_backward(d_grad_up1_out_, d_grad_conv3_out_,
-                                batch_size, LATENT_H, LATENT_W, LATENT_C, 2);
+                              batch_size, LATENT_H, LATENT_W, LATENT_C, 2);
     
-    // ReLU3 backward (optimized)
-    launch_relu_backward_optimized(d_grad_conv3_out_, d_conv3_out_, d_grad_conv3_out_,
-                                   batch_size * LATENT_H * LATENT_W * LATENT_C);
+    // FUSED: Conv3 + ReLU3 backward: (8, 8, 128) <- (8, 8, 128)
+    launch_conv2d_relu_backward_fused(
+        d_grad_conv3_out_,           
+        d_pool2_out_,             
+        d_conv3_weights_,           
+        d_conv3_out_,          
+        d_grad_pool2_out_,         
+        d_grad_conv3_weights_,    
+        d_grad_conv3_bias_,        
+        batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1
+    );
     
-    // Conv3 backward: (8, 8, 128) <- (8, 8, 128)
-    launch_conv2d_optimized_backward(d_grad_conv3_out_, d_pool2_out_, d_conv3_weights_,
-                            d_grad_pool2_out_, d_grad_conv3_weights_, d_grad_conv3_bias_,
-                            batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
+    // ENCODER BACKWARD
     
     // MaxPool2 backward: (16, 16, 128) <- (8, 8, 128)
-    launch_maxpool2d_backward(d_grad_pool2_out_, d_conv2_out_, d_indices2_, d_pool2_out_,
-                            d_grad_conv2_out_, batch_size, 16, 16, CONV2_FILTERS, 2, 2);
+    launch_maxpool2d_backward(d_grad_pool2_out_, d_conv2_out_, d_indices2_, 
+                             d_pool2_out_, d_grad_conv2_out_, 
+                             batch_size, 16, 16, CONV2_FILTERS, 2, 2);
     
-    // ReLU2 backward (optimized)
-    launch_relu_backward_optimized(d_grad_conv2_out_, d_conv2_out_, d_grad_conv2_out_,
-                                   batch_size * 16 * 16 * CONV2_FILTERS);
-    
-    // Conv2 backward: (16, 16, 256) <- (16, 16, 128)
-    launch_conv2d_optimized_backward(d_grad_conv2_out_, d_pool1_out_, d_conv2_weights_,
-                            d_grad_pool1_out_, d_grad_conv2_weights_, d_grad_conv2_bias_,
-                            batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
+    // FUSED: Conv2 + ReLU2 backward: (16, 16, 256) <- (16, 16, 128)
+    launch_conv2d_relu_backward_fused(
+        d_grad_conv2_out_,           
+        d_pool1_out_,                
+        d_conv2_weights_,            
+        d_conv2_out_,                
+        d_grad_pool1_out_,           
+        d_grad_conv2_weights_,       
+        d_grad_conv2_bias_,          
+        batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1
+    );
     
     // MaxPool1 backward: (32, 32, 256) <- (16, 16, 256)
-    launch_maxpool2d_backward(d_grad_pool1_out_, d_conv1_out_,d_indices1_, d_pool1_out_,
-                            d_grad_conv1_out_, batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
+    launch_maxpool2d_backward(d_grad_pool1_out_, d_conv1_out_, d_indices1_, 
+                            d_pool1_out_, d_grad_conv1_out_, 
+                            batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
     
-    // ReLU1 backward (optimized)
-    launch_relu_backward_optimized(d_grad_conv1_out_, d_conv1_out_, d_grad_conv1_out_,
-                                   batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-    
-    // Conv1 backward: (32, 32, 3) <- (32, 32, 256)
+    // FUSED: Conv1 + ReLU1 backward: (32, 32, 3) <- (32, 32, 256)
     float* d_grad_input = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_grad_input, size * sizeof(float)));
-    launch_zero_grad(d_grad_input, size);
+    CUDA_CHECK(cudaMalloc(&d_grad_input, batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float)));
+    launch_zero_grad(d_grad_input, batch_size * INPUT_H * INPUT_W * INPUT_C);
     
-    launch_conv2d_optimized_backward(d_grad_conv1_out_, d_input_, d_conv1_weights_,
-                            d_grad_input, d_grad_conv1_weights_, d_grad_conv1_bias_,
-                            batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
-
-    cudaFree(d_grad_input);
+    launch_conv2d_relu_backward_fused(
+        d_grad_conv1_out_,          
+        d_input_,              
+        d_conv1_weights_,           
+        d_conv1_out_,               
+        d_grad_input,            
+        d_grad_conv1_weights_,    
+        d_grad_conv1_bias_,        
+        batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1
+    );
+    
+    CUDA_CHECK(cudaFree(d_grad_input));
 }
 
 void AutoencoderGPUOptimized2::update_weights_gpu(float learning_rate, int batch_size) {
@@ -514,14 +537,14 @@ void AutoencoderGPUOptimized2::extract_features(const std::vector<float>& images
                              actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
                              cudaMemcpyHostToDevice));
         
-        launch_conv2d_relu_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
+        launch_conv2d_relu_bias_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
                                    actual_batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
         
         launch_maxpool2d_optimized_forward(d_conv1_out_, d_pool1_out_, d_indices1_,
                                         actual_batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
         
-        launch_conv2d_relu_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
-                                   actual_batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
+        launch_conv2d_relu_bias_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
+                                        actual_batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
         
         launch_maxpool2d_optimized_forward(d_conv2_out_, d_pool2_out_, d_indices2_,
                                     actual_batch_size, 16, 16, CONV2_FILTERS, 2, 2);

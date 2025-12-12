@@ -15,176 +15,248 @@
         } \
     } while(0)
 
-// Tile size for shared memory
-#define TILE_SIZE 8
-
-// ==================== Shared Memory Optimized Convolution ====================
+# define TILE_SIZE 16
+# define CHANNELS_PER_ITER 8
 __global__ void conv2d_shared_kernel(const float* input, float* output,
-                                     const float* weights, const float* bias,
-                                     int batch, int in_h, int in_w, int in_c,
-                                     int out_c, int kernel_size, int stride, int padding) {
-    __shared__ float tile[TILE_SIZE + 2][TILE_SIZE + 2][8];  // Tile with padding for 3x3 kernel
-    
+                                      const float* weights, const float* bias,
+                                      int batch, int in_h, int in_w, int in_c,
+                                      int out_c, int kernel_size, int stride, int padding) {
     int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
     int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
     
+    const int TILE_WITH_HALO = TILE_SIZE + kernel_size - 1;
+    
     int tx = threadIdx.x;
     int ty = threadIdx.y;
-    int tz = threadIdx.z;
+    int tz = threadIdx.z;  // For channels
     
-    // Flatten batch and output channel into single dimension
-    int batch_oc = blockIdx.z;
-    int b = batch_oc / out_c;
-    int oc = batch_oc % out_c;
+    int tile_x = blockIdx.x;
+    int tile_y = blockIdx.y;
+    int b = blockIdx.z / out_c;
+    int oc = blockIdx.z % out_c;
     
-    int out_x = blockIdx.x * TILE_SIZE + tx;
-    int out_y = blockIdx.y * TILE_SIZE + ty;
+    if (b >= batch || oc >= out_c) return;
     
-    if (out_x < out_w && out_y < out_h && oc < out_c && b < batch) {
-        // Collaborative loading into shared memory
-        for (int ic = tz; ic < min(8, in_c); ic += blockDim.z) {
-            int in_x = out_x * stride - padding + tx;
-            int in_y = out_y * stride - padding + ty;
+    int out_x = tile_x * TILE_SIZE + tx;
+    int out_y = tile_y * TILE_SIZE + ty;
+    
+    extern __shared__ float s_input[];
+    
+    float sum = (out_x < out_w && out_y < out_h) ? bias[oc] : 0.0f;
+    
+    for (int ic_base = 0; ic_base < in_c; ic_base += CHANNELS_PER_ITER) {
+        int channels_this_iter = min(CHANNELS_PER_ITER, in_c - ic_base);
+        
+        int tid = tz * (blockDim.x * blockDim.y) + ty * blockDim.x + tx;
+        int total_threads = blockDim.x * blockDim.y * blockDim.z;
+        int tile_size = TILE_WITH_HALO * TILE_WITH_HALO * channels_this_iter;
+        
+        for (int i = tid; i < tile_size; i += total_threads) {
+            int local_c = i / (TILE_WITH_HALO * TILE_WITH_HALO);
+            int spatial = i % (TILE_WITH_HALO * TILE_WITH_HALO);
+            int local_y = spatial / TILE_WITH_HALO;
+            int local_x = spatial % TILE_WITH_HALO;
             
-            if (in_x >= 0 && in_x < in_w && in_y >= 0 && in_y < in_h) {
+            int in_y = tile_y * TILE_SIZE * stride + local_y - padding;
+            int in_x = tile_x * TILE_SIZE * stride + local_x - padding;
+            int ic = ic_base + local_c;
+            
+            float val = 0.0f;
+            if (in_y >= 0 && in_y < in_h && in_x >= 0 && in_x < in_w) {
                 int in_idx = b * in_h * in_w * in_c + in_y * in_w * in_c + in_x * in_c + ic;
-                tile[ty][tx][ic] = input[in_idx];
-            } else {
-                tile[ty][tx][ic] = 0.0f;
+                val = input[in_idx];
             }
+            
+            s_input[i] = val;
         }
         
         __syncthreads();
         
-        // Compute convolution using shared memory
-        float sum = bias[oc];
-        
-        for (int ic = 0; ic < min(8, in_c); ++ic) {
-            for (int kh = 0; kh < kernel_size; ++kh) {
-                for (int kw = 0; kw < kernel_size; ++kw) {
-                    if (ty + kh < TILE_SIZE + 2 && tx + kw < TILE_SIZE + 2) {
+        if (out_x < out_w && out_y < out_h) {
+            for (int ic = 0; ic < channels_this_iter; ++ic) {
+                for (int kh = 0; kh < kernel_size; ++kh) {
+                    for (int kw = 0; kw < kernel_size; ++kw) {
+                        int local_y = ty * stride + kh;
+                        int local_x = tx * stride + kw;
+                        
+                        int s_idx = ic * TILE_WITH_HALO * TILE_WITH_HALO + 
+                                   local_y * TILE_WITH_HALO + local_x;
+                        
                         int w_idx = oc * in_c * kernel_size * kernel_size + 
-                                   ic * kernel_size * kernel_size + kh * kernel_size + kw;
-                        sum += tile[ty + kh][tx + kw][ic] * weights[w_idx];
+                                   (ic_base + ic) * kernel_size * kernel_size + 
+                                   kh * kernel_size + kw;
+                        
+                        sum += s_input[s_idx] * weights[w_idx];
                     }
                 }
             }
         }
         
+        __syncthreads();
+    }
+    
+    // Write output
+    if (out_x < out_w && out_y < out_h) {
         int out_idx = b * out_h * out_w * out_c + out_y * out_w * out_c + out_x * out_c + oc;
         output[out_idx] = sum;
     }
 }
 
 void launch_conv2d_shared_forward(const float* d_input, float* d_output,
-                                   const float* d_weights, const float* d_bias,
-                                   int batch, int in_h, int in_w, int in_c,
-                                   int out_c, int kernel_size, int stride, int padding) {
+                           const float* d_weights, const float* d_bias,
+                           int batch, int in_h, int in_w, int in_c,
+                           int out_c, int kernel_size, int stride, int padding) {
     int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
     int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
     
-    dim3 block(TILE_SIZE, TILE_SIZE, 4);
-    dim3 grid((out_w + TILE_SIZE - 1) / TILE_SIZE,
-              (out_h + TILE_SIZE - 1) / TILE_SIZE,
-              batch * out_c);  // Flatten batch and out_c
+    const int TILE_WITH_HALO = TILE_SIZE + kernel_size - 1;
     
-    conv2d_shared_kernel<<<grid, block>>>(
+    int shared_mem_size = TILE_WITH_HALO * TILE_WITH_HALO * CHANNELS_PER_ITER * sizeof(float);
+    
+    dim3 block(TILE_SIZE, TILE_SIZE, 1);
+    
+    int grid_x = (out_w + TILE_SIZE - 1) / TILE_SIZE;
+    int grid_y = (out_h + TILE_SIZE - 1) / TILE_SIZE;
+    int grid_z = batch * out_c;
+    dim3 grid(grid_x, grid_y, grid_z);
+    
+    conv2d_shared_kernel<<<grid, block, shared_mem_size>>>(
         d_input, d_output, d_weights, d_bias,
         batch, in_h, in_w, in_c, out_c, kernel_size, stride, padding);
     
     CUDA_CHECK(cudaGetLastError());
 }
 
-// Sử dụng shared memory cho giai đoạn backward
 __global__ void conv2d_shared_backward_kernel(const float* grad_output, const float* input,
-                                              const float* weights, float* grad_input,
-                                              float* grad_weights, float* grad_bias,
-                                              int batch, int in_h, int in_w, int in_c,
-                                              int out_c, int kernel_size, int stride, int padding) {
-    __shared__ float tile_input[TILE_SIZE + 2][TILE_SIZE + 2][8];
-    
-    int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
-    int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
+                                       const float* weights, float* grad_input,
+                                       float* grad_weights, float* grad_bias,
+                                       int batch, int in_h, int in_w, int in_c, 
+                                       int out_h, int out_w, int out_c, 
+                                       int kernel_size, int stride, int padding) {
+    const int TILE_WITH_HALO = TILE_SIZE + kernel_size - 1;
     
     int tx = threadIdx.x;
     int ty = threadIdx.y;
-    int tz = threadIdx.z;
     
-    int batch_oc = blockIdx.z;
-    int b = batch_oc / out_c;
-    int oc = batch_oc % out_c;
+    int tile_x = blockIdx.x;
+    int tile_y = blockIdx.y;
+    int b = blockIdx.z / out_c;
+    int oc = blockIdx.z % out_c;
     
-    int out_x = blockIdx.x * TILE_SIZE + tx;
-    int out_y = blockIdx.y * TILE_SIZE + ty;
+    if (b >= batch || oc >= out_c) return;
     
-    if (out_x < out_w && out_y < out_h && oc < out_c && b < batch) {
-        // Load gradient output into shared memory
-        int out_idx = b * out_h * out_w * out_c + out_y * out_w * out_c + out_x * out_c + oc;
-        float grad_out_val = grad_output[out_idx];
+    int out_x = tile_x * TILE_SIZE + tx;
+    int out_y = tile_y * TILE_SIZE + ty;
+    
+    extern __shared__ float shared_mem[];
+    float* s_grad_out = shared_mem;
+    float* s_input = s_grad_out + TILE_SIZE * TILE_SIZE;
+    float* s_grad_bias_local = s_input + TILE_WITH_HALO * TILE_WITH_HALO * CHANNELS_PER_ITER;
+    
+    float grad_val = 0.0f;
+    if (out_x < out_w && out_y < out_h) {
+        int grad_idx = b * out_h * out_w * out_c + out_y * out_w * out_c + out_x * out_c + oc;
+        grad_val = grad_output[grad_idx];
+    }
+    s_grad_out[ty * TILE_SIZE + tx] = grad_val;
+    
+    if (tx == 0 && ty == 0) {
+        s_grad_bias_local[0] = 0.0f;
+    }
+    __syncthreads();
+    
+    atomicAdd(s_grad_bias_local, grad_val);
+    
+    for (int ic_base = 0; ic_base < in_c; ic_base += CHANNELS_PER_ITER) {
+        int channels_this_iter = min(CHANNELS_PER_ITER, in_c - ic_base);
         
-        // Accumulate gradient for bias
-        if (tx == 0 && ty == 0) {
-            atomicAdd(&grad_bias[oc], grad_out_val);
-        }
+        int tid = ty * blockDim.x + tx;
+        int total_threads = blockDim.x * blockDim.y;
+        int tile_size = TILE_WITH_HALO * TILE_WITH_HALO * channels_this_iter;
         
-        // Load input into shared memory
-        for (int ic = tz; ic < min(8, in_c); ic += blockDim.z) {
-            int in_x = out_x * stride - padding + tx;
-            int in_y = out_y * stride - padding + ty;
+        for (int i = tid; i < tile_size; i += total_threads) {
+            int local_c = i / (TILE_WITH_HALO * TILE_WITH_HALO);
+            int spatial = i % (TILE_WITH_HALO * TILE_WITH_HALO);
+            int local_y = spatial / TILE_WITH_HALO;
+            int local_x = spatial % TILE_WITH_HALO;
             
-            if (in_x >= 0 && in_x < in_w && in_y >= 0 && in_y < in_h) {
+            int in_y = tile_y * TILE_SIZE * stride + local_y - padding;
+            int in_x = tile_x * TILE_SIZE * stride + local_x - padding;
+            int ic = ic_base + local_c;
+            
+            float val = 0.0f;
+            if (in_y >= 0 && in_y < in_h && in_x >= 0 && in_x < in_w) {
                 int in_idx = b * in_h * in_w * in_c + in_y * in_w * in_c + in_x * in_c + ic;
-                tile_input[ty][tx][ic] = input[in_idx];
-            } else {
-                tile_input[ty][tx][ic] = 0.0f;
+                val = input[in_idx];
             }
+            
+            s_input[i] = val;
         }
         
         __syncthreads();
         
-        // Compute gradients
-        for (int ic = 0; ic < min(8, in_c); ++ic) {
-            for (int kh = 0; kh < kernel_size; ++kh) {
-                for (int kw = 0; kw < kernel_size; ++kw) {
-                    int ih = out_y * stride - padding + kh;
-                    int iw = out_x * stride - padding + kw;
-                    
-                    if (ih >= 0 && ih < in_h && iw >= 0 && iw < in_w) {
-                        int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + ic;
-                        int w_idx = oc * in_c * kernel_size * kernel_size + 
-                                   ic * kernel_size * kernel_size + kh * kernel_size + kw;
+        if (out_x < out_w && out_y < out_h) {
+            for (int ic = 0; ic < channels_this_iter; ++ic) {
+                for (int kh = 0; kh < kernel_size; ++kh) {
+                    for (int kw = 0; kw < kernel_size; ++kw) {
+                        int local_y = ty * stride + kh;
+                        int local_x = tx * stride + kw;
+                        int in_y = out_y * stride - padding + kh;
+                        int in_x = out_x * stride - padding + kw;
                         
-                        // Gradient w.r.t. weights
-                        if (ty + kh < TILE_SIZE + 2 && tx + kw < TILE_SIZE + 2) {
-                            atomicAdd(&grad_weights[w_idx], tile_input[ty + kh][tx + kw][ic] * grad_out_val);
+                        if (in_y >= 0 && in_y < in_h && in_x >= 0 && in_x < in_w) {
+                            int s_idx = ic * TILE_WITH_HALO * TILE_WITH_HALO + 
+                                       local_y * TILE_WITH_HALO + local_x;
+                            float in_val = s_input[s_idx];
+                            
+                            int w_idx = oc * in_c * kernel_size * kernel_size + 
+                                       (ic_base + ic) * kernel_size * kernel_size + 
+                                       kh * kernel_size + kw;
+                            
+                            atomicAdd(&grad_weights[w_idx], in_val * grad_val);
+                            
+                            int in_idx = b * in_h * in_w * in_c + in_y * in_w * in_c + 
+                                        in_x * in_c + (ic_base + ic);
+                            atomicAdd(&grad_input[in_idx], weights[w_idx] * grad_val);
                         }
-                        
-                        // Gradient w.r.t. input
-                        atomicAdd(&grad_input[in_idx], weights[w_idx] * grad_out_val);
                     }
                 }
             }
         }
+        
+        __syncthreads();
+    }
+    
+    if (tx == 0 && ty == 0) {
+        atomicAdd(&grad_bias[oc], s_grad_bias_local[0]);
     }
 }
 
 void launch_conv2d_shared_backward(const float* d_grad_output, const float* d_input,
-                                   const float* d_weights, float* d_grad_input,
-                                   float* d_grad_weights, float* d_grad_bias,
-                                   int batch, int in_h, int in_w, int in_c,
-                                   int out_c, int kernel_size, int stride, int padding) {
+                            const float* d_weights, float* d_grad_input,
+                            float* d_grad_weights, float* d_grad_bias,
+                            int batch, int in_h, int in_w, int in_c,
+                            int out_c, int kernel_size, int stride, int padding) {
     int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
     int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
     
-    dim3 block(TILE_SIZE, TILE_SIZE, 4);
-    dim3 grid((out_w + TILE_SIZE - 1) / TILE_SIZE,
-              (out_h + TILE_SIZE - 1) / TILE_SIZE,
-              batch * out_c);
+    const int TILE_WITH_HALO = TILE_SIZE + kernel_size - 1;
     
-    conv2d_shared_backward_kernel<<<grid, block>>>(
+    // Shared memory: grad_output tile + input tile + bias accumulator
+    int shared_mem_size = (TILE_SIZE * TILE_SIZE + 
+                          TILE_WITH_HALO * TILE_WITH_HALO * CHANNELS_PER_ITER + 
+                          1) * sizeof(float);
+    
+    dim3 block(TILE_SIZE, TILE_SIZE, 1);
+    int grid_x = (out_w + TILE_SIZE - 1) / TILE_SIZE;
+    int grid_y = (out_h + TILE_SIZE - 1) / TILE_SIZE;
+    int grid_z = batch * out_c;
+    dim3 grid(grid_x, grid_y, grid_z);
+    
+    conv2d_shared_backward_kernel<<<grid, block, shared_mem_size>>>(
         d_grad_output, d_input, d_weights, d_grad_input,
         d_grad_weights, d_grad_bias,
-        batch, in_h, in_w, in_c, out_c, kernel_size, stride, padding);
+        batch, in_h, in_w, in_c, out_h, out_w, out_c, kernel_size, stride, padding);
     
     CUDA_CHECK(cudaGetLastError());
 }
