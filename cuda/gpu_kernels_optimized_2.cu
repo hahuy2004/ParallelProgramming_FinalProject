@@ -459,7 +459,7 @@ void launch_upsample2d_backward2(const float* d_grad_output, float* d_grad_input
     int block_size = 256;
     int grid_size = (total_out + block_size - 1) / block_size;
     
-    upsample2d_backward_kernel<<<grid_size, block_size, 0, stream>>>(
+    upsample2d_backward_kernel2<<<grid_size, block_size, 0, stream>>>(
         d_grad_output, d_grad_input, batch, in_h, in_w, c, out_h, out_w, scale_factor);
     
     CUDA_CHECK(cudaGetLastError());
