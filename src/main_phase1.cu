@@ -68,22 +68,6 @@ int main(int argc, char** argv) {
     std::string weights_path = "weights/autoencoder_cpu.weights";
     autoencoder.save_weights(weights_path);
     
-    // Extract features for a small subset (for demonstration)
-    std::cout << "\n=== Extracting Features ===" << std::endl;
-    int num_test_samples = 1000;  // Extract features for first 1000 samples
-    std::vector<float> features;
-    
-    auto extract_start = std::chrono::high_resolution_clock::now();
-    
-    autoencoder.extract_features(train_images, num_test_samples, features);
-    
-    auto extract_end = std::chrono::high_resolution_clock::now();
-    float extract_time = std::chrono::duration<float>(extract_end - extract_start).count();
-    
-    std::cout << "Feature extraction completed" << std::endl;
-    std::cout << "Extracted features shape: (" << num_test_samples << ", 8192)" << std::endl;
-    std::cout << "Time: " << extract_time << " seconds" << std::endl;
-    
     std::cout << "\n=== Phase 1 Completed ===" << std::endl;
     std::cout << "Weights saved to: " << weights_path << std::endl;
     

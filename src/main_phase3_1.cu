@@ -62,30 +62,10 @@ int main(int argc, char** argv) {
     // Save weights
     std::string weights_path_1 = "weights/autoencoder_gpu_optimized_1.weights";
     autoencoder_ver_1.save_weights(weights_path_1);
-    
-    // Extract features
-    std::cout << "\n=== Extracting Features Version 1 ===" << std::endl;
-    std::vector<float> train_features_1;
-    std::vector<float> test_features_1;
-    
-    auto extract_start_1 = std::chrono::high_resolution_clock::now();
-    
-    autoencoder_ver_1.extract_features(train_images, loader.get_train_size(), train_features_1);
-    autoencoder_ver_1.extract_features(loader.get_test_images(), loader.get_test_size(), test_features_1);
-    
-    auto extract_end_1 = std::chrono::high_resolution_clock::now();
-    float extract_time_1 = std::chrono::duration<float>(extract_end_1 - extract_start_1).count();
-    
-    std::cout << "Feature extraction completed" << std::endl;
-    std::cout << "Training features: (" << loader.get_train_size() << ", 8192)" << std::endl;
-    std::cout << "Test features: (" << loader.get_test_size() << ", 8192)" << std::endl;
-    std::cout << "Time: " << extract_time_1 << " seconds" << std::endl;
         
     std::cout << "\n=== Phase 3.1 Completed ===" << std::endl;
     std::cout << "Weights version 1 saved to: " << weights_path_1 << std::endl;
-    std::cout << "\nMemory Optimization Results:" << std::endl;
-    std::cout << "  Training: " << train_time_1 << "s (Target: <600s)" << std::endl;
-    std::cout << "  Feature extraction: " << extract_time_1 << "s (Target: <20s)" << std::endl;
+    std::cout << "Memory Optimization Training Time: " << train_time_1 << "s" << std::endl;
 
     return 0;
 }

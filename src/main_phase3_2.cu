@@ -65,29 +65,9 @@ int main(int argc, char** argv) {
     std::string weights_path_2 = "weights/autoencoder_gpu_optimized_2.weights";
     autoencoder_ver_2.save_weights(weights_path_2);
     
-    // Extract features
-    std::cout << "\n=== Extracting Features Version 2 ===" << std::endl;
-    std::vector<float> train_features_2;
-    std::vector<float> test_features_2;
-    
-    auto extract_start_2 = std::chrono::high_resolution_clock::now();
-    
-    autoencoder_ver_2.extract_features(train_images, loader.get_train_size(), train_features_2);
-    autoencoder_ver_2.extract_features(loader.get_test_images(), loader.get_test_size(), test_features_2);
-    
-    auto extract_end_2 = std::chrono::high_resolution_clock::now();
-    float extract_time_2 = std::chrono::duration<float>(extract_end_2 - extract_start_2).count();
-    
-    std::cout << "Feature extraction completed" << std::endl;
-    std::cout << "Training features: (" << loader.get_train_size() << ", 8192)" << std::endl;
-    std::cout << "Test features: (" << loader.get_test_size() << ", 8192)" << std::endl;
-    std::cout << "Time: " << extract_time_2 << " seconds" << std::endl;
-    
     std::cout << "\n=== Phase 3.2 Completed ===" << std::endl;
     std::cout << "Weights version 2 saved to: " << weights_path_2 << std::endl;
-    std::cout << "\nKernel Fusion Optimization Results:" << std::endl;
-    std::cout << "  Training: " << train_time_2 << "s (Target: <600s)" << std::endl;
-    std::cout << "  Feature extraction: " << extract_time_2 << "s (Target: <20s)" << std::endl;
+    std::cout << "Kernel Fusion Optimization Training Time: " << train_time_2 << "s" << std::endl;
     
     return 0;
 }

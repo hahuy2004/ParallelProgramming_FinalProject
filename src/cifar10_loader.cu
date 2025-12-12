@@ -114,7 +114,8 @@ void Cifar10Loader::get_batch(int batch_idx, int batch_size,
 }
 
 void Cifar10Loader::shuffle_training_data() {
-    static std::random_device rd;
-    static std::mt19937 gen(rd());
+    // static std::random_device rd;
+    // static std::mt19937 gen(rd()); 
+    static std::mt19937 gen(42);       // Fixed seed - reproducible results
     std::shuffle(train_indices_.begin(), train_indices_.end(), gen);
 }

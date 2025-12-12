@@ -15,8 +15,9 @@ AutoencoderCPU::~AutoencoderCPU() {
 }
 
 void AutoencoderCPU::initialize_weights() {
-    std::random_device rd;
-    std::mt19937 gen(rd());
+    // std::random_device rd;
+    // std::mt19937 gen(rd());
+    std::mt19937 gen(42);      // Fixed seed for reproducibility
     
     // Xavier/He initialization
     auto init_conv = [&](std::vector<float>& weights, int in_c, int out_c, int k) {
