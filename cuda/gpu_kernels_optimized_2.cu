@@ -186,57 +186,30 @@ __global__ void conv2d_relu_backward_kernel_fused(const float* grad_output,
     int oh = (idx / out_c / out_w) % out_h;
     int b = idx / out_c / out_w / out_h;
     
-    // Apply ReLU derivative: grad flows back only if conv_output > 0
-    float conv_out_val = conv_output[idx];
-    float grad_out_val = grad_output[idx];
-    
     // Fused ReLU backward: multiply gradient by ReLU mask
-    float grad_after_relu = grad_out_val * (conv_out_val > 0.0f ? 1.0f : 0.0f);
+    float grad_after_relu = grad_output[idx] * (conv_output[idx] > 0.0f ? 1.0f : 0.0f);
     
     // Now this becomes the gradient for Conv2D backward
     atomicAdd(&grad_bias[oc], grad_after_relu);
     
     // Compute Conv2D gradients with the masked gradient
-    if (kernel_size == 3) {
-        for (int ic = 0; ic < in_c; ++ic) {
-            #pragma unroll
-            for (int kh = 0; kh < 3; ++kh) {
-                int ih = oh * stride - padding + kh;
-                if (ih >= 0 && ih < in_h) {
-                    #pragma unroll
-                    for (int kw = 0; kw < 3; ++kw) {
-                        int iw = ow * stride - padding + kw;
-                        if (iw >= 0 && iw < in_w) {
-                            int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + ic;
-                            int w_idx = oc * in_c * 9 + ic * 9 + kh * 3 + kw;
-                            
-                            float in_val = input[in_idx];
-                            float w_val = weights[w_idx];
-                            
-                            atomicAdd(&grad_weights[w_idx], in_val * grad_after_relu);
-                            atomicAdd(&grad_input[in_idx], w_val * grad_after_relu);
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        for (int ic = 0; ic < in_c; ++ic) {
-            #pragma unroll 4
-            for (int kh = 0; kh < kernel_size; ++kh) {
-                int ih = oh * stride - padding + kh;
-                if (ih >= 0 && ih < in_h) {
-                    #pragma unroll 4
-                    for (int kw = 0; kw < kernel_size; ++kw) {
-                        int iw = ow * stride - padding + kw;
-                        if (iw >= 0 && iw < in_w) {
-                            int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + ic;
-                            int w_idx = oc * in_c * kernel_size * kernel_size + 
-                                       ic * kernel_size * kernel_size + kh * kernel_size + kw;
-                            
-                            atomicAdd(&grad_weights[w_idx], input[in_idx] * grad_after_relu);
-                            atomicAdd(&grad_input[in_idx], weights[w_idx] * grad_after_relu);
-                        }
+    for (int ic = 0; ic < in_c; ++ic) {
+        #pragma unroll
+        for (int kh = 0; kh < kernel_size; ++kh) {
+            int ih = oh * stride - padding + kh;
+            if (ih >= 0 && ih < in_h) {
+                #pragma unroll
+                for (int kw = 0; kw < kernel_size; ++kw) {
+                    int iw = ow * stride - padding + kw;
+                    if (iw >= 0 && iw < in_w) {
+                        int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + ic;
+                        int w_idx = oc * in_c * 9 + ic * 9 + kh * 3 + kw;
+                        
+                        float in_val = input[in_idx];
+                        float w_val = weights[w_idx];
+                        
+                        atomicAdd(&grad_weights[w_idx], in_val * grad_after_relu);
+                        atomicAdd(&grad_input[in_idx], w_val * grad_after_relu);
                     }
                 }
             }
