@@ -236,7 +236,7 @@ void AutoencoderGPUOptimized2::free_device_memory() {
 void AutoencoderGPUOptimized2::forward_gpu_optimized(int batch_size) {
     // Encoder with FUSED operations
     // Fused Conv2D + ReLU + Bias
-    launch_conv2d_relu_bias_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
+    launch_conv2d_forward_relu_fused(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
                                batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
     
     // MaxPool loop unrolling 
@@ -244,7 +244,7 @@ void AutoencoderGPUOptimized2::forward_gpu_optimized(int batch_size) {
                                 batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
     
     // Fused Conv2D + ReLU + Bias
-    launch_conv2d_relu_bias_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
+    launch_conv2d_forward_relu_fused(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
                                 batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
     
     // MaxPool: (16, 16, 128) -> (8, 8, 128)
@@ -253,7 +253,7 @@ void AutoencoderGPUOptimized2::forward_gpu_optimized(int batch_size) {
     
     // Decoder
     // Conv3 + ReLU (fused): (8, 8, 128) -> (8, 8, 128)
-    launch_conv2d_relu_bias_forward(d_pool2_out_, d_conv3_out_, d_conv3_weights_, d_conv3_bias_,
+    launch_conv2d_forward_relu_fused(d_pool2_out_, d_conv3_out_, d_conv3_weights_, d_conv3_bias_,
                                 batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
     
     // Upsample
@@ -261,7 +261,7 @@ void AutoencoderGPUOptimized2::forward_gpu_optimized(int batch_size) {
                              batch_size, LATENT_H, LATENT_W, LATENT_C, 2);
     
     // Fused Conv2D + ReLU + Bias
-    launch_conv2d_relu_bias_forward(d_up1_out_, d_conv4_out_, d_conv4_weights_, d_conv4_bias_,
+    launch_conv2d_forward_relu_fused(d_up1_out_, d_conv4_out_, d_conv4_weights_, d_conv4_bias_,
                                batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1);
     
     // Upsample: (16, 16, 256) -> (32, 32, 256)

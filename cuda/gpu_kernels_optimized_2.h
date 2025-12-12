@@ -2,7 +2,7 @@
 #define GPU_KERNELS_OPTIMIZED_2_H
 
 // Sử dụng fused Conv2D + ReLU + Bias
-void launch_conv2d_relu_bias_forward(const float* d_input, float* d_output,
+void launch_conv2d_forward_relu_fused(const float* d_input, float* d_output,
                                      const float* d_weights, const float* d_bias,
                                      int batch, int in_h, int in_w, int in_c,
                                      int out_c, int kernel_size, int stride, int padding);
