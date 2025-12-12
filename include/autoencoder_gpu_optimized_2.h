@@ -96,11 +96,12 @@ private:
     float* h_loss_pinned_[2]; 
 
     float* d_input_next_ = nullptr; 
+    float* d_pool2_out_next_ = nullptr; 
     float* d_loss_next_ = nullptr;
 
     cudaEvent_t h2d_complete_event_[2]; 
     cudaEvent_t comp_complete_event_[2]; 
-    
+
     size_t pinned_buffer_size_;
 
     int current_batch_size_;
@@ -109,14 +110,14 @@ private:
     void allocate_device_memory(int batch_size);
     void free_device_memory();
     
-    coid setup_pipeline_resources(int batch_size);
+    void setup_pipeline_resources(int batch_size);
     void free_pipeline_resources();
     
     void forward_gpu_optimized(int batch_size, cudaStream_t stream);
     void backward_gpu_optimized(int batch_size, cudaStream_t stream);
     void update_weights_gpu(float learning_rate, int batch_size, cudaStream_t stream);
     
-    float compute_loss_gpu(int batch_size, cudaStream_t stream);
+    void compute_loss_gpu(int batch_size, float* d_next_loss, cudaStream_t stream);
 };
 
 #endif // AUTOENCODER_GPU_OPTIMIZED_2_H
