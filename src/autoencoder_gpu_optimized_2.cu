@@ -537,13 +537,13 @@ void AutoencoderGPUOptimized2::extract_features(const std::vector<float>& images
                              actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
                              cudaMemcpyHostToDevice));
         
-        launch_conv2d_relu_bias_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
+        launch_conv2d_forward_relu_fused(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
                                    actual_batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
         
         launch_maxpool2d_optimized_forward(d_conv1_out_, d_pool1_out_, d_indices1_,
                                         actual_batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
         
-        launch_conv2d_relu_bias_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
+        launch_conv2d_forward_relu_fused(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
                                         actual_batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
         
         launch_maxpool2d_optimized_forward(d_conv2_out_, d_pool2_out_, d_indices2_,
