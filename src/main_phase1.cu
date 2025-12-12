@@ -40,7 +40,7 @@ int main(int argc, char** argv) {
     
     // Số lượng ảnh train (mặc định: toàn bộ dataset)
     // int num_train_images = loader.get_train_size();  // 50,000 ảnh (comment để dùng custom)
-    int num_train_images = 500;  // <-- Chỉ train với 5,000 ảnh
+    int num_train_images = 500;  // <-- Chỉ train với 500 ảnh
     
     // Create and train autoencoder
     std::cout << "\n=== Training CPU Autoencoder (Sanity Check) ===" << std::endl;

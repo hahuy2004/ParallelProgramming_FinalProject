@@ -343,8 +343,9 @@ void AutoencoderCPU::forward(const float* input, int batch_size) {
 
 void AutoencoderCPU::backward(const float* input, int batch_size) {
     // Compute loss gradient: d_loss/d_output = 2 * (output - target) / N
+    int total_elements = grad_conv5_out_.size();
     for (size_t i = 0; i < grad_conv5_out_.size(); ++i) {
-        grad_conv5_out_[i] = 2.0f * (conv5_out_[i] - input[i]) / batch_size;
+        grad_conv5_out_[i] = 2.0f * (conv5_out_[i] - input[i]) / total_elements;
     }
     
     // Clear all weight gradients
@@ -513,6 +514,15 @@ void AutoencoderCPU::train(const std::vector<float>& train_images,
             float loss = compute_loss(
                 std::vector<float>(batch_data, batch_data + actual_batch_size * INPUT_H * INPUT_W * INPUT_C),
                 conv5_out_, actual_batch_size);
+            
+            // Check for NaN or Inf
+            if (std::isnan(loss) || std::isinf(loss)) {
+                std::cerr << "\nERROR: Loss is NaN/Inf at epoch " << (epoch + 1) 
+                          << ", batch " << (batch + 1) << std::endl;
+                std::cerr << "Stopping training..." << std::endl;
+                return;
+            }
+            
             epoch_loss += loss;
             
             // Backward pass
