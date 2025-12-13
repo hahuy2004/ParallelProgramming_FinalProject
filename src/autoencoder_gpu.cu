@@ -278,9 +278,10 @@ void AutoencoderGPU::forward_gpu(int batch_size) {
     launch_upsample2d_forward(d_conv4_out_, d_up2_out_,
                              batch_size, 16, 16, CONV1_FILTERS, 2);
     
-    // Conv5 (no activation): (32, 32, 256) -> (32, 32, 3)
+    // Conv5 + Sigmoid: (32, 32, 256) -> (32, 32, 3)
     launch_conv2d_forward(d_up2_out_, d_conv5_out_, d_conv5_weights_, d_conv5_bias_,
                          batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
+    launch_sigmoid_forward(d_conv5_out_, batch_size * INPUT_H * INPUT_W * INPUT_C);
 }
 
 // Newly added: Compute MSE loss on GPU
@@ -321,7 +322,13 @@ void AutoencoderGPU::backward_gpu(int batch_size) {
     launch_zero_grad(d_grad_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
     
     // Compute gradient of loss w.r.t. output
-    launch_mse_loss_backward(d_conv5_out_, d_input_, d_grad_conv5_out_, size);
+    float* d_grad_mse;
+    CUDA_CHECK(cudaMalloc(&d_grad_mse, size * sizeof(float)));
+    launch_mse_loss_backward(d_conv5_out_, d_input_, d_grad_mse, size);
+    
+    // Backward through sigmoid
+    launch_sigmoid_backward(d_grad_mse, d_conv5_out_, d_grad_conv5_out_, size);
+    CUDA_CHECK(cudaFree(d_grad_mse));
     
     // Backward through decoder
     // Conv5 backward: (32, 32, 3) <- (32, 32, 256)

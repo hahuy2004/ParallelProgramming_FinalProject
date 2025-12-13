@@ -126,6 +126,12 @@ void AutoencoderCPU::relu_forward(const float* input, float* output, int size) {
     }
 }
 
+void AutoencoderCPU::sigmoid_forward(const float* input, float* output, int size) {
+    for (int i = 0; i < size; ++i) {
+        output[i] = 1.0f / (1.0f + std::exp(-input[i]));
+    }
+}
+
 void AutoencoderCPU::maxpool2d_forward(const float* input, float* output,
                                         int batch, int h, int w, int c,
                                         int pool_size, int stride) {
@@ -234,6 +240,15 @@ void AutoencoderCPU::relu_backward(const float* grad_output, float* grad_input,
     }
 }
 
+void AutoencoderCPU::sigmoid_backward(const float* grad_output, float* grad_input,
+                                       const float* output, int size) {
+    for (int i = 0; i < size; ++i) {
+        // d_sigmoid/dx = sigmoid(x) * (1 - sigmoid(x))
+        float sigmoid_val = output[i];
+        grad_input[i] = grad_output[i] * sigmoid_val * (1.0f - sigmoid_val);
+    }
+}
+
 void AutoencoderCPU::maxpool2d_backward(const float* grad_output, float* grad_input,
                                          const float* input, const float* output,
                                          int batch, int h, int w, int c,
@@ -337,17 +352,22 @@ void AutoencoderCPU::forward(const float* input, int batch_size) {
     upsample2d_forward(conv4_out_.data(), up2_out_.data(),
                        batch_size, 16, 16, CONV1_FILTERS, 2);
     
-    // Conv5 (no activation): (32, 32, 256) -> (32, 32, 3)
+    // Conv5 + Sigmoid: (32, 32, 256) -> (32, 32, 3)
     conv2d_forward(up2_out_.data(), conv5_out_.data(), conv5_weights_.data(), conv5_bias_.data(),
                    batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
+    sigmoid_forward(conv5_out_.data(), conv5_out_.data(), conv5_out_.size());
 }
 
 void AutoencoderCPU::backward(const float* input, int batch_size) {
     // Compute loss gradient: d_loss/d_output = 2 * (output - target) / N
     int total_elements = grad_conv5_out_.size();
-    for (size_t i = 0; i < grad_conv5_out_.size(); ++i) {
-        grad_conv5_out_[i] = 2.0f * (conv5_out_[i] - input[i]) / total_elements;
+    std::vector<float> grad_mse(grad_conv5_out_.size());
+    for (size_t i = 0; i < grad_mse.size(); ++i) {
+        grad_mse[i] = 2.0f * (conv5_out_[i] - input[i]) / total_elements;
     }
+    
+    // Backward through sigmoid
+    sigmoid_backward(grad_mse.data(), grad_conv5_out_.data(), conv5_out_.data(), grad_conv5_out_.size());
     
     // Clear all weight gradients
     std::fill(grad_conv1_weights_.begin(), grad_conv1_weights_.end(), 0.0f);

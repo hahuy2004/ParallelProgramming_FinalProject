@@ -12,6 +12,9 @@ void launch_conv2d_forward(const float* d_input, float* d_output,
 // ReLU activation
 void launch_relu_forward(float* d_data, int size);
 
+// Sigmoid activation
+void launch_sigmoid_forward(float* d_data, int size);
+
 // Max pooling
 void launch_maxpool2d_forward(const float* d_input, float* d_output, float* indices, 
                               int batch, int h, int w, int c,
@@ -51,6 +54,10 @@ void launch_conv2d_backward(const float* d_grad_output, const float* d_input,
 // ReLU Backward
 void launch_relu_backward(const float* d_grad_output, const float* d_input,
                          float* d_grad_input, int size);
+
+// Sigmoid Backward
+void launch_sigmoid_backward(const float* d_grad_output, const float* d_output,
+                            float* d_grad_input, int size);
 
 // MaxPool2D Backward
 void launch_maxpool2d_backward(const float* d_grad_output, float* d_input, const float* indices,

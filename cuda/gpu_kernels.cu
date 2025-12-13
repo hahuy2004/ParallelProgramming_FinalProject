@@ -86,6 +86,22 @@ void launch_relu_forward(float* d_data, int size) {
     CUDA_CHECK(cudaGetLastError());
 }
 
+// ==================== Sigmoid Kernel ====================
+__global__ void sigmoid_forward_kernel(float* data, int size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        data[idx] = 1.0f / (1.0f + expf(-data[idx]));
+    }
+}
+
+void launch_sigmoid_forward(float* d_data, int size) {
+    int block_size = 256;
+    int grid_size = (size + block_size - 1) / block_size;
+    
+    sigmoid_forward_kernel<<<grid_size, block_size>>>(d_data, size);
+    CUDA_CHECK(cudaGetLastError());
+}
+
 // ==================== Max Pooling Kernel ====================
 __global__ void maxpool2d_forward_kernel(const float* input, float* output, float* indices,
                                          int batch, int h, int w, int c, int out_h, int out_w,
@@ -382,6 +398,25 @@ void launch_relu_backward(const float* d_grad_output, const float* d_input,
     int grid_size = (size + block_size - 1) / block_size;
     
     relu_backward_kernel<<<grid_size, block_size>>>(d_grad_output, d_input, d_grad_input, size);
+    CUDA_CHECK(cudaGetLastError());
+}
+
+// Sigmoid Backward: gradient = grad_output * sigmoid(x) * (1 - sigmoid(x))
+__global__ void sigmoid_backward_kernel(const float* grad_output, const float* output,
+                                        float* grad_input, int size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        float sigmoid_val = output[idx];
+        grad_input[idx] = grad_output[idx] * sigmoid_val * (1.0f - sigmoid_val);
+    }
+}
+
+void launch_sigmoid_backward(const float* d_grad_output, const float* d_output,
+                             float* d_grad_input, int size) {
+    int block_size = 256;
+    int grid_size = (size + block_size - 1) / block_size;
+    
+    sigmoid_backward_kernel<<<grid_size, block_size>>>(d_grad_output, d_output, d_grad_input, size);
     CUDA_CHECK(cudaGetLastError());
 }
 

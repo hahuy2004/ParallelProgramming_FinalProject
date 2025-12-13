@@ -103,6 +103,8 @@ private:
     
     void relu_forward(const float* input, float* output, int size);
     
+    void sigmoid_forward(const float* input, float* output, int size);
+    
     void maxpool2d_forward(const float* input, float* output,
                           int batch, int h, int w, int c,
                           int pool_size, int stride);
@@ -120,6 +122,9 @@ private:
     
     void relu_backward(const float* grad_output, float* grad_input,
                       const float* output, int size);
+    
+    void sigmoid_backward(const float* grad_output, float* grad_input,
+                         const float* output, int size);
     
     void maxpool2d_backward(const float* grad_output, float* grad_input,
                            const float* input, const float* output,
