@@ -34,19 +34,38 @@ __global__ void conv2d_forward_relu_fused(const float* input, float* output,
     float sum = bias[oc];
     
     // Fused convolution with loop unrolling for kernel_size=3
-    for (int ic = 0; ic < in_c; ++ic) {
-        // Unroll only small kernel dimensions
-        #pragma unroll
-        for (int kh = 0; kh < 3; ++kh) {
-            int ih = oh * stride - padding + kh;
-            if (ih >= 0 && ih < in_h) {
-                #pragma unroll
-                for (int kw = 0; kw < 3; ++kw) {
-                    int iw = ow * stride - padding + kw;
-                    if (iw >= 0 && iw < in_w) {
-                        int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + ic;
-                        int w_idx = oc * in_c * 9 + ic * 9 + kh * 3 + kw;
-                        sum += input[in_idx] * weights[w_idx];
+    if (kernel_size == 3){
+        for (int ic = 0; ic < in_c; ++ic) {
+            // Unroll only small kernel dimensions
+            #pragma unroll
+            for (int kh = 0; kh < 3; ++kh) {
+                int ih = oh * stride - padding + kh;
+                if (ih >= 0 && ih < in_h) {
+                    #pragma unroll
+                    for (int kw = 0; kw < 3; ++kw) {
+                        int iw = ow * stride - padding + kw;
+                        if (iw >= 0 && iw < in_w) {
+                            int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + ic;
+                            int w_idx = oc * in_c * 9 + ic * 9 + kh * 3 + kw;
+                            sum += input[in_idx] * weights[w_idx];
+                        }
+                    }
+                }
+            }
+        }
+    }
+    else{
+        for (int ic = 0; ic < in_c; ++ic) {
+            for (int kh = 0; kh < kernel_size; ++kh) {
+                int ih = oh * stride - padding + kh;
+                if (ih >= 0 && ih < in_h) {
+                    for (int kw = 0; kw < kernel_size; ++kw) {
+                        int iw = ow * stride - padding + kw;
+                        if (iw >= 0 && iw < in_w) {
+                            int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + ic;
+                            int w_idx = oc * in_c * 9 + ic * 9 + kh * 3 + kw;
+                            sum += input[in_idx] * weights[w_idx];
+                        }
                     }
                 }
             }
@@ -222,11 +241,9 @@ __global__ void conv2d_relu_backward_kernel_fused(const float* grad_output,
         }
     } else {
         for (int ic = 0; ic < in_c; ++ic) {
-            #pragma unroll 4
             for (int kh = 0; kh < kernel_size; ++kh) {
                 int ih = oh * stride - padding + kh;
                 if (ih >= 0 && ih < in_h) {
-                    #pragma unroll 4
                     for (int kw = 0; kw < kernel_size; ++kw) {
                         int iw = ow * stride - padding + kw;
                         if (iw >= 0 && iw < in_w) {
