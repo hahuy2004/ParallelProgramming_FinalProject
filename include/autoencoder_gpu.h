@@ -20,11 +20,8 @@ public:
                float learning_rate);
     
     // Save/Load weights
-    bool save_weights(const std::string& filepath) const;
-    bool load_weights(const std::string& filepath);
-    
-    // Get last loss
-    float get_loss() const;
+    void save_weights(const std::string& filepath);
+    void load_weights(const std::string& filepath);
     
     // Extract features from encoder (bottleneck: 128*8*8 = 8192 features)
     void extract_features(const float* input_chw, float* output_features);
