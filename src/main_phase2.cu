@@ -11,7 +11,7 @@ int main(int argc, char** argv) {
     // ==================== CONFIGURATION ==================== //
     // GPU PHASE: Full training với 50000 ảnh, 20 epochs
     int batch_size = 64;  
-    int epochs = 5;  // Change to 20 for full training
+    int epochs = 1;  // Change to 20 for full training
     float learning_rate = 0.001f;
     int num_train_images = 50000; // Change to 50000 for full training
     std::string data_dir = "cifar-10-batches-bin";
@@ -19,8 +19,6 @@ int main(int argc, char** argv) {
         data_dir = argv[1];
     }
     //=====================================================//
-
-
 
     // ===================== Load Dataset ==================== //
     // Load CIFAR-10 dataset
@@ -38,8 +36,6 @@ int main(int argc, char** argv) {
     std::cout << "Test images: " << loader.get_test_size() << std::endl;
     
     //=====================================================//
-
-
 
     //==================== TRAINING ====================//
     std::cout << "\n========== Training GPU Autoencoder (Naive) =========" << std::endl;
@@ -59,7 +55,7 @@ int main(int argc, char** argv) {
     
     // Save weights
     std::cout << "\n=== Saving Model ===" << std::endl;
-    std::string weights_path = "weights/autoencoder_gpu_naive.weights";
+    std::string weights_path = "weights/autoencoder_gpu_naive.bin";
     autoencoder.save_weights(weights_path);
     
     std::cout << "\n=== Phase 2 Completed ===" << std::endl;

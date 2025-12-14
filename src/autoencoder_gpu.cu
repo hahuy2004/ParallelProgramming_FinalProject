@@ -1,80 +1,33 @@
+// Naive GPU Implementation
 #include "../include/autoencoder_gpu.h"
-#include "../cuda/gpu_kernels.h"
+#include "../cuda/gpu_kernels_naive.h"
 #include <cuda_runtime.h>
 #include <iostream>
-#include <iomanip>
+#include <vector>
+#include <cmath>
 #include <fstream>
+#include <cstdlib>
+#include <ctime>
 #include <chrono>
-#include <cstring>
+#include <iomanip>
 #include <random>
 
+// Error checking macro
 #define CUDA_CHECK(call) \
     do { \
         cudaError_t err = call; \
         if (err != cudaSuccess) { \
-            fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, \
-                    cudaGetErrorString(err)); \
+            std::cerr << "CUDA Error: " << cudaGetErrorString(err) \
+                      << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
             exit(EXIT_FAILURE); \
         } \
     } while(0)
 
-AutoencoderGPU::AutoencoderGPU() : current_batch_size_(0) {
-    // Initialize all pointers to nullptr
-    d_conv1_weights_ = nullptr;
-    d_conv1_bias_ = nullptr;
-    d_conv2_weights_ = nullptr;
-    d_conv2_bias_ = nullptr;
-    d_conv3_weights_ = nullptr;
-    d_conv3_bias_ = nullptr;
-    d_conv4_weights_ = nullptr;
-    d_conv4_bias_ = nullptr;
-    d_conv5_weights_ = nullptr;
-    d_conv5_bias_ = nullptr;
-    
-    d_input_ = nullptr;
-    d_conv1_out_ = nullptr;
-    d_pool1_out_ = nullptr;
-    d_indices1_ = nullptr;
-    d_conv2_out_ = nullptr;
-    d_pool2_out_ = nullptr;
-    d_indices2_ = nullptr;
-    d_conv3_out_ = nullptr;
-    d_up1_out_ = nullptr;
-    d_conv4_out_ = nullptr;
-    d_up2_out_ = nullptr;
-    d_conv5_out_ = nullptr;
-    
-    d_grad_conv5_out_ = nullptr;
-    d_grad_up2_out_ = nullptr;
-    d_grad_conv4_out_ = nullptr;
-    d_grad_up1_out_ = nullptr;
-    d_grad_conv3_out_ = nullptr;
-    d_grad_pool2_out_ = nullptr;
-    d_grad_conv2_out_ = nullptr;
-    d_grad_pool1_out_ = nullptr;
-    d_grad_conv1_out_ = nullptr;
-    
-    d_grad_conv1_weights_ = nullptr;
-    d_grad_conv1_bias_ = nullptr;
-    d_grad_conv2_weights_ = nullptr;
-    d_grad_conv2_bias_ = nullptr;
-    d_grad_conv3_weights_ = nullptr;
-    d_grad_conv3_bias_ = nullptr;
-    d_grad_conv4_weights_ = nullptr;
-    d_grad_conv4_bias_ = nullptr;
-    d_grad_conv5_weights_ = nullptr;
-    d_grad_conv5_bias_ = nullptr;
-    
-    d_loss_ = nullptr;
-    
-    initialize_weights();
-}
+// ============================================================================
+// AUTOENCODER CLASS IMPLEMENTATION
+// ============================================================================
 
-AutoencoderGPU::~AutoencoderGPU() {
-    free_device_memory();
-}
-
-void AutoencoderGPU::initialize_weights() {
+AutoencoderGPU::AutoencoderGPU() {
     // std::random_device rd;
     // std::mt19937 gen(rd());
     std::mt19937 gen(42);      // Fixed seed for reproducibility
@@ -95,440 +48,212 @@ void AutoencoderGPU::initialize_weights() {
     };
     
     // Initialize conv1: 3 -> 256, kernel 3x3
-    init_and_upload(&d_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3, INPUT_C * 3 * 3);
-    init_bias(&d_conv1_bias_, CONV1_FILTERS);
+    init_and_upload(&d_conv1_weight, CONV1_FILTERS * INPUT_C * 3 * 3, INPUT_C * 3 * 3);
+    init_bias(&d_conv1_bias, CONV1_FILTERS);
     
     // Initialize conv2: 256 -> 128, kernel 3x3
-    init_and_upload(&d_conv2_weights_, CONV2_FILTERS * CONV1_FILTERS * 3 * 3, CONV1_FILTERS * 3 * 3);
-    init_bias(&d_conv2_bias_, CONV2_FILTERS);
+    init_and_upload(&d_conv2_weight, CONV2_FILTERS * CONV1_FILTERS * 3 * 3, CONV1_FILTERS * 3 * 3);
+    init_bias(&d_conv2_bias, CONV2_FILTERS);
     
     // Initialize conv3: 128 -> 128, kernel 3x3
-    init_and_upload(&d_conv3_weights_, LATENT_C * LATENT_C * 3 * 3, LATENT_C * 3 * 3);
-    init_bias(&d_conv3_bias_, LATENT_C);
+    init_and_upload(&d_conv3_weight, LATENT_C * LATENT_C * 3 * 3, LATENT_C * 3 * 3);
+    init_bias(&d_conv3_bias, LATENT_C);
     
     // Initialize conv4: 128 -> 256, kernel 3x3
-    init_and_upload(&d_conv4_weights_, CONV1_FILTERS * LATENT_C * 3 * 3, LATENT_C * 3 * 3);
-    init_bias(&d_conv4_bias_, CONV1_FILTERS);
+    init_and_upload(&d_conv4_weight, CONV1_FILTERS * LATENT_C * 3 * 3, LATENT_C * 3 * 3);
+    init_bias(&d_conv4_bias, CONV1_FILTERS);
     
     // Initialize conv5: 256 -> 3, kernel 3x3
-    init_and_upload(&d_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3, CONV1_FILTERS * 3 * 3);
-    init_bias(&d_conv5_bias_, INPUT_C);
+    init_and_upload(&d_conv5_weight, INPUT_C * CONV1_FILTERS * 3 * 3, CONV1_FILTERS * 3 * 3);
+    init_bias(&d_conv5_bias, INPUT_C);
     
     // Allocate loss buffer
-    CUDA_CHECK(cudaMalloc(&d_loss_, sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_loss, sizeof(float)));
     
     // Allocate gradient buffers for weights
-    CUDA_CHECK(cudaMalloc(&d_grad_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv1_bias_, CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv2_weights_, CONV2_FILTERS * CONV1_FILTERS * 3 * 3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv2_bias_, CONV2_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv3_weights_, LATENT_C * LATENT_C * 3 * 3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv3_bias_, LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv4_weights_, CONV1_FILTERS * LATENT_C * 3 * 3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv4_bias_, CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv5_bias_, INPUT_C * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv1_weight_grad, CONV1_FILTERS * INPUT_C * 3 * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv1_bias_grad, CONV1_FILTERS * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv2_weight_grad, CONV2_FILTERS * CONV1_FILTERS * 3 * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv2_bias_grad, CONV2_FILTERS * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv3_weight_grad, LATENT_C * LATENT_C * 3 * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv3_bias_grad, LATENT_C * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv4_weight_grad, CONV1_FILTERS * LATENT_C * 3 * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv4_bias_grad, CONV1_FILTERS * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv5_weight_grad, INPUT_C * CONV1_FILTERS * 3 * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv5_bias_grad, INPUT_C * sizeof(float)));
+    
+    // Allocate device memory for activations
+    CUDA_CHECK(cudaMalloc(&d_input, INPUT_C * INPUT_H * INPUT_W * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv1_out, CONV1_FILTERS * INPUT_H * INPUT_W * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_relu1_out, CONV1_FILTERS * INPUT_H * INPUT_W * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_pool1_out, CONV1_FILTERS * (INPUT_H/2) * (INPUT_W/2) * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv2_out, CONV2_FILTERS * (INPUT_H/2) * (INPUT_W/2) * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_relu2_out, CONV2_FILTERS * (INPUT_H/2) * (INPUT_W/2) * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_pool2_out, LATENT_C * LATENT_H * LATENT_W * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv3_out, LATENT_C * LATENT_H * LATENT_W * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_relu3_out, LATENT_C * LATENT_H * LATENT_W * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_up1_out, LATENT_C * (INPUT_H/2) * (INPUT_W/2) * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv4_out, CONV1_FILTERS * (INPUT_H/2) * (INPUT_W/2) * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_relu4_out, CONV1_FILTERS * (INPUT_H/2) * (INPUT_W/2) * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_up2_out, CONV1_FILTERS * INPUT_H * INPUT_W * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv5_out, INPUT_C * INPUT_H * INPUT_W * sizeof(float)));
+    
+    // Allocate device memory for gradient buffers
+    CUDA_CHECK(cudaMalloc(&d_grad_conv5, INPUT_C * INPUT_H * INPUT_W * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_up2, CONV1_FILTERS * INPUT_H * INPUT_W * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_relu4, CONV1_FILTERS * (INPUT_H/2) * (INPUT_W/2) * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv4, CONV1_FILTERS * (INPUT_H/2) * (INPUT_W/2) * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_up1, LATENT_C * (INPUT_H/2) * (INPUT_W/2) * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_relu3, LATENT_C * LATENT_H * LATENT_W * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv3, LATENT_C * LATENT_H * LATENT_W * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_pool2, LATENT_C * (INPUT_H/2) * (INPUT_W/2) * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_relu2, CONV2_FILTERS * (INPUT_H/2) * (INPUT_W/2) * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv2, CONV2_FILTERS * (INPUT_H/2) * (INPUT_W/2) * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_pool1, CONV1_FILTERS * INPUT_H * INPUT_W * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_relu1, CONV1_FILTERS * INPUT_H * INPUT_W * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv1, CONV1_FILTERS * INPUT_H * INPUT_W * sizeof(float)));
     
     std::cout << "GPU weights initialized" << std::endl;
 }
 
-void AutoencoderGPU::allocate_device_memory(int batch_size) {
-    if (batch_size == current_batch_size_) return;
+AutoencoderGPU::~AutoencoderGPU() {
+    // Free all device memory
+    cudaFree(d_conv1_weight);
+    cudaFree(d_conv1_bias);
+    cudaFree(d_conv2_weight);
+    cudaFree(d_conv2_bias);
+    cudaFree(d_conv3_weight);
+    cudaFree(d_conv3_bias);
+    cudaFree(d_conv4_weight);
+    cudaFree(d_conv4_bias);
+    cudaFree(d_conv5_weight);
+    cudaFree(d_conv5_bias);
     
-    // Free old memory if exists
-    if (current_batch_size_ > 0) {
-        cudaFree(d_input_);
-        cudaFree(d_conv1_out_);
-        cudaFree(d_pool1_out_);
-        cudaFree(d_indices1_);
-        cudaFree(d_conv2_out_);
-        cudaFree(d_pool2_out_);
-        cudaFree(d_indices2_);
-        cudaFree(d_conv3_out_);
-        cudaFree(d_up1_out_);
-        cudaFree(d_conv4_out_);
-        cudaFree(d_up2_out_);
-        cudaFree(d_conv5_out_);
-        
-        cudaFree(d_grad_conv5_out_);
-        cudaFree(d_grad_up2_out_);
-        cudaFree(d_grad_conv4_out_);
-        cudaFree(d_grad_up1_out_);
-        cudaFree(d_grad_conv3_out_);
-        cudaFree(d_grad_pool2_out_);
-        cudaFree(d_grad_conv2_out_);
-        cudaFree(d_grad_pool1_out_);
-        cudaFree(d_grad_conv1_out_);
-    }
+    cudaFree(d_conv1_weight_grad);
+    cudaFree(d_conv1_bias_grad);
+    cudaFree(d_conv2_weight_grad);
+    cudaFree(d_conv2_bias_grad);
+    cudaFree(d_conv3_weight_grad);
+    cudaFree(d_conv3_bias_grad);
+    cudaFree(d_conv4_weight_grad);
+    cudaFree(d_conv4_bias_grad);
+    cudaFree(d_conv5_weight_grad);
+    cudaFree(d_conv5_bias_grad);
     
-    current_batch_size_ = batch_size;
+    cudaFree(d_input);
+    cudaFree(d_conv1_out);
+    cudaFree(d_relu1_out);
+    cudaFree(d_pool1_out);
+    cudaFree(d_conv2_out);
+    cudaFree(d_relu2_out);
+    cudaFree(d_pool2_out);
+    cudaFree(d_conv3_out);
+    cudaFree(d_relu3_out);
+    cudaFree(d_up1_out);
+    cudaFree(d_conv4_out);
+    cudaFree(d_relu4_out);
+    cudaFree(d_up2_out);
+    cudaFree(d_conv5_out);
     
-    // Allocate activation buffers
-    CUDA_CHECK(cudaMalloc(&d_input_, batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_pool1_out_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_indices1_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_pool2_out_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_indices2_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_up1_out_, batch_size * 16 * 16 * LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_up2_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_conv5_out_, batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float)));
+    cudaFree(d_grad_conv5);
+    cudaFree(d_grad_up2);
+    cudaFree(d_grad_relu4);
+    cudaFree(d_grad_conv4);
+    cudaFree(d_grad_up1);
+    cudaFree(d_grad_relu3);
+    cudaFree(d_grad_conv3);
+    cudaFree(d_grad_pool2);
+    cudaFree(d_grad_relu2);
+    cudaFree(d_grad_conv2);
+    cudaFree(d_grad_pool1);
+    cudaFree(d_grad_relu1);
+    cudaFree(d_grad_conv1);
     
-    // Allocate gradient buffers for activations
-    CUDA_CHECK(cudaMalloc(&d_grad_conv5_out_, batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_up2_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_up1_out_, batch_size * 16 * 16 * LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_pool2_out_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_pool1_out_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float)));
+    cudaFree(d_loss);
 }
 
-void AutoencoderGPU::free_device_memory() {
-    if (d_conv1_weights_) cudaFree(d_conv1_weights_);
-    if (d_conv1_bias_) cudaFree(d_conv1_bias_);
-    if (d_conv2_weights_) cudaFree(d_conv2_weights_);
-    if (d_conv2_bias_) cudaFree(d_conv2_bias_);
-    if (d_conv3_weights_) cudaFree(d_conv3_weights_);
-    if (d_conv3_bias_) cudaFree(d_conv3_bias_);
-    if (d_conv4_weights_) cudaFree(d_conv4_weights_);
-    if (d_conv4_bias_) cudaFree(d_conv4_bias_);
-    if (d_conv5_weights_) cudaFree(d_conv5_weights_);
-    if (d_conv5_bias_) cudaFree(d_conv5_bias_);
+float AutoencoderGPU::train_step(const float* input_chw, float learning_rate) {
+    // Copy input to device
+    CUDA_CHECK(cudaMemcpy(d_input, input_chw, INPUT_C*INPUT_H*INPUT_W*sizeof(float), cudaMemcpyHostToDevice));
+
+    // Forward pass
+    forward();
     
-    if (d_input_) cudaFree(d_input_);
-    if (d_conv1_out_) cudaFree(d_conv1_out_);
-    if (d_pool1_out_) cudaFree(d_pool1_out_);
-    if (d_indices1_) cudaFree(d_indices1_);
-    if (d_conv2_out_) cudaFree(d_conv2_out_);
-    if (d_pool2_out_) cudaFree(d_pool2_out_);
-    if (d_indices2_) cudaFree(d_indices2_);
-    if (d_conv3_out_) cudaFree(d_conv3_out_);
-    if (d_up1_out_) cudaFree(d_up1_out_);
-    if (d_conv4_out_) cudaFree(d_conv4_out_);
-    if (d_up2_out_) cudaFree(d_up2_out_);
-    if (d_conv5_out_) cudaFree(d_conv5_out_);
+    // Compute loss and gradient
+    float h_loss = 0.0f;
+    CUDA_CHECK(cudaMemset(d_loss, 0, sizeof(float)));
     
-    if (d_grad_conv5_out_) cudaFree(d_grad_conv5_out_);
-    if (d_grad_up2_out_) cudaFree(d_grad_up2_out_);
-    if (d_grad_conv4_out_) cudaFree(d_grad_conv4_out_);
-    if (d_grad_up1_out_) cudaFree(d_grad_up1_out_);
-    if (d_grad_conv3_out_) cudaFree(d_grad_conv3_out_);
-    if (d_grad_pool2_out_) cudaFree(d_grad_pool2_out_);
-    if (d_grad_conv2_out_) cudaFree(d_grad_conv2_out_);
-    if (d_grad_pool1_out_) cudaFree(d_grad_pool1_out_);
-    if (d_grad_conv1_out_) cudaFree(d_grad_conv1_out_);
+    int size = INPUT_C * INPUT_H * INPUT_W;
+    launch_mse_loss(d_conv5_out, d_input, d_loss, d_grad_conv5, size);
+    CUDA_CHECK(cudaDeviceSynchronize());
     
-    if (d_grad_conv1_weights_) cudaFree(d_grad_conv1_weights_);
-    if (d_grad_conv1_bias_) cudaFree(d_grad_conv1_bias_);
-    if (d_grad_conv2_weights_) cudaFree(d_grad_conv2_weights_);
-    if (d_grad_conv2_bias_) cudaFree(d_grad_conv2_bias_);
-    if (d_grad_conv3_weights_) cudaFree(d_grad_conv3_weights_);
-    if (d_grad_conv3_bias_) cudaFree(d_grad_conv3_bias_);
-    if (d_grad_conv4_weights_) cudaFree(d_grad_conv4_weights_);
-    if (d_grad_conv4_bias_) cudaFree(d_grad_conv4_bias_);
-    if (d_grad_conv5_weights_) cudaFree(d_grad_conv5_weights_);
-    if (d_grad_conv5_bias_) cudaFree(d_grad_conv5_bias_);
+    CUDA_CHECK(cudaMemcpy(&h_loss, d_loss, sizeof(float), cudaMemcpyDeviceToHost));
     
-    if (d_loss_) cudaFree(d_loss_);
+    // Backward pass
+    backward();
+    
+    // Update weights
+    update_weights(learning_rate);
+    CUDA_CHECK(cudaDeviceSynchronize());
+    
+    return h_loss;
 }
 
-// Newly added: GPU forward pass for complete encoder-decoder pipeline
-void AutoencoderGPU::forward_gpu(int batch_size) {
-    // Encoder
-    // Conv1 + ReLU: (32, 32, 3) -> (32, 32, 256)
-    launch_conv2d_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
-                         batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
-    launch_relu_forward(d_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-    
-    // MaxPool: (32, 32, 256) -> (16, 16, 256)
-    launch_maxpool2d_forward(d_conv1_out_, d_pool1_out_, d_indices1_,
-                            batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
-    
-    // Conv2 + ReLU: (16, 16, 256) -> (16, 16, 128)
-    launch_conv2d_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
-                         batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
-    launch_relu_forward(d_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS);
-    
-    // MaxPool: (16, 16, 128) -> (8, 8, 128) - Latent
-    launch_maxpool2d_forward(d_conv2_out_, d_pool2_out_, d_indices2_,
-                            batch_size, 16, 16, CONV2_FILTERS, 2, 2);
-    
-    // Decoder
-    // Conv3 + ReLU: (8, 8, 128) -> (8, 8, 128)
-    launch_conv2d_forward(d_pool2_out_, d_conv3_out_, d_conv3_weights_, d_conv3_bias_,
-                         batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
-    launch_relu_forward(d_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
-    
-    // Upsample: (8, 8, 128) -> (16, 16, 128)
-    launch_upsample2d_forward(d_conv3_out_, d_up1_out_,
-                             batch_size, LATENT_H, LATENT_W, LATENT_C, 2);
-    
-    // Conv4 + ReLU: (16, 16, 128) -> (16, 16, 256)
-    launch_conv2d_forward(d_up1_out_, d_conv4_out_, d_conv4_weights_, d_conv4_bias_,
-                         batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1);
-    launch_relu_forward(d_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS);
-    
-    // Upsample: (16, 16, 256) -> (32, 32, 256)
-    launch_upsample2d_forward(d_conv4_out_, d_up2_out_,
-                             batch_size, 16, 16, CONV1_FILTERS, 2);
-    
-    // Conv5 (no activation): (32, 32, 256) -> (32, 32, 3)
-    launch_conv2d_forward(d_up2_out_, d_conv5_out_, d_conv5_weights_, d_conv5_bias_,
-                         batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
-}
-
-// Newly added: Compute MSE loss on GPU
-float AutoencoderGPU::compute_loss_gpu(int batch_size) {
-    int size = batch_size * INPUT_H * INPUT_W * INPUT_C;
-    launch_mse_loss(d_input_, d_conv5_out_, d_loss_, size);
-    
-    float h_loss;
-    CUDA_CHECK(cudaMemcpy(&h_loss, d_loss_, sizeof(float), cudaMemcpyDeviceToHost));
-    return h_loss / size;
-}
-
-// Newly added: Complete GPU backward pass implementation
-void AutoencoderGPU::backward_gpu(int batch_size) {
-    int size = batch_size * INPUT_H * INPUT_W * INPUT_C;
-    
-    // Zero out all gradients for weights and biases
-    launch_zero_grad(d_grad_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3);
-    launch_zero_grad(d_grad_conv1_bias_, CONV1_FILTERS);
-    launch_zero_grad(d_grad_conv2_weights_, CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
-    launch_zero_grad(d_grad_conv2_bias_, CONV2_FILTERS);
-    launch_zero_grad(d_grad_conv3_weights_, LATENT_C * LATENT_C * 3 * 3);
-    launch_zero_grad(d_grad_conv3_bias_, LATENT_C);
-    launch_zero_grad(d_grad_conv4_weights_, CONV1_FILTERS * LATENT_C * 3 * 3);
-    launch_zero_grad(d_grad_conv4_bias_, CONV1_FILTERS);
-    launch_zero_grad(d_grad_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3);
-    launch_zero_grad(d_grad_conv5_bias_, INPUT_C);
-    
-    // Zero out activation gradients
-    launch_zero_grad(d_grad_conv5_out_, batch_size * INPUT_H * INPUT_W * INPUT_C);
-    launch_zero_grad(d_grad_up2_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-    launch_zero_grad(d_grad_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS);
-    launch_zero_grad(d_grad_up1_out_, batch_size * 16 * 16 * LATENT_C);
-    launch_zero_grad(d_grad_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
-    launch_zero_grad(d_grad_pool2_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
-    launch_zero_grad(d_grad_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS);
-    launch_zero_grad(d_grad_pool1_out_, batch_size * 16 * 16 * CONV1_FILTERS);
-    launch_zero_grad(d_grad_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-    
-    // Compute gradient of loss w.r.t. output
-    launch_mse_loss_backward(d_conv5_out_, d_input_, d_grad_conv5_out_, size);
-    
-    // Backward through decoder
-    // Conv5 backward: (32, 32, 3) <- (32, 32, 256)
-    launch_conv2d_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_, d_grad_up2_out_,
-                          d_grad_conv5_weights_, d_grad_conv5_bias_,
-                          batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
-    
-    // Upsample2 backward: (16, 16, 256) <- (32, 32, 256)
-    launch_upsample2d_backward(d_grad_up2_out_, d_grad_conv4_out_,
-                              batch_size, 16, 16, CONV1_FILTERS, 2);
-    
-    // ReLU4 backward
-    launch_relu_backward(d_grad_conv4_out_, d_conv4_out_, d_grad_conv4_out_,
-                        batch_size * 16 * 16 * CONV1_FILTERS);
-    
-    // Conv4 backward: (16, 16, 128) <- (16, 16, 256)
-    launch_conv2d_backward(d_grad_conv4_out_, d_up1_out_, d_conv4_weights_, d_grad_up1_out_,
-                          d_grad_conv4_weights_, d_grad_conv4_bias_,
-                          batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1);
-    
-    // Upsample1 backward: (8, 8, 128) <- (16, 16, 128)
-    launch_upsample2d_backward(d_grad_up1_out_, d_grad_conv3_out_,
-                              batch_size, LATENT_H, LATENT_W, LATENT_C, 2);
-    
-    // ReLU3 backward
-    launch_relu_backward(d_grad_conv3_out_, d_conv3_out_, d_grad_conv3_out_,
-                        batch_size * LATENT_H * LATENT_W * LATENT_C);
-    
-    // Conv3 backward: (8, 8, 128) <- (8, 8, 128)
-    launch_conv2d_backward(d_grad_conv3_out_, d_pool2_out_, d_conv3_weights_, d_grad_pool2_out_,
-                          d_grad_conv3_weights_, d_grad_conv3_bias_,
-                          batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
-    
-    // Backward through encoder
-    // MaxPool2 backward: (16, 16, 128) <- (8, 8, 128)
-    launch_maxpool2d_backward(d_grad_pool2_out_, d_conv2_out_, d_indices2_, d_pool2_out_,
-                             d_grad_conv2_out_, batch_size, 16, 16, CONV2_FILTERS, 2, 2);
-    
-    // ReLU2 backward
-    launch_relu_backward(d_grad_conv2_out_, d_conv2_out_, d_grad_conv2_out_,
-                        batch_size * 16 * 16 * CONV2_FILTERS);
-    
-    // Conv2 backward: (16, 16, 256) <- (16, 16, 128)
-    launch_conv2d_backward(d_grad_conv2_out_, d_pool1_out_, d_conv2_weights_, d_grad_pool1_out_,
-                          d_grad_conv2_weights_, d_grad_conv2_bias_,
-                          batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
-    
-    // MaxPool1 backward: (32, 32, 256) <- (16, 16, 256)
-    launch_maxpool2d_backward(d_grad_pool1_out_, d_conv1_out_, d_indices1_, 
-                            d_pool1_out_, d_grad_conv1_out_, 
-                            batch_size, INPUT_H, INPUT_W, CONV1_FILTERS,
-                             2, 2);
-    
-    // ReLU1 backward
-    launch_relu_backward(d_grad_conv1_out_, d_conv1_out_, d_grad_conv1_out_,
-                        batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-    
-    // Conv1 backward: (32, 32, 3) <- (32, 32, 256)
-    // Note: We don't need gradient w.r.t. input, but we compute it anyway for completeness
-    float* d_grad_input = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_grad_input, size * sizeof(float)));
-    launch_zero_grad(d_grad_input, size);
-    
-    launch_conv2d_backward(d_grad_conv1_out_, d_input_, d_conv1_weights_, d_grad_input,
-                          d_grad_conv1_weights_, d_grad_conv1_bias_,
-                          batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
-    
-    cudaFree(d_grad_input);
-}
-
-// Newly added: Update all weights using SGD on GPU
-void AutoencoderGPU::update_weights_gpu(float learning_rate, int batch_size) {
-    // Update all weights using SGD
-    launch_sgd_update(d_conv1_weights_, d_grad_conv1_weights_, learning_rate,
-                     CONV1_FILTERS * INPUT_C * 3 * 3);
-    launch_sgd_update(d_conv1_bias_, d_grad_conv1_bias_, learning_rate, CONV1_FILTERS);
-    
-    launch_sgd_update(d_conv2_weights_, d_grad_conv2_weights_, learning_rate,
-                     CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
-    launch_sgd_update(d_conv2_bias_, d_grad_conv2_bias_, learning_rate, CONV2_FILTERS);
-    
-    launch_sgd_update(d_conv3_weights_, d_grad_conv3_weights_, learning_rate,
-                     LATENT_C * LATENT_C * 3 * 3);
-    launch_sgd_update(d_conv3_bias_, d_grad_conv3_bias_, learning_rate, LATENT_C);
-    
-    launch_sgd_update(d_conv4_weights_, d_grad_conv4_weights_, learning_rate,
-                     CONV1_FILTERS * LATENT_C * 3 * 3);
-    launch_sgd_update(d_conv4_bias_, d_grad_conv4_bias_, learning_rate, CONV1_FILTERS);
-    
-    launch_sgd_update(d_conv5_weights_, d_grad_conv5_weights_, learning_rate,
-                     INPUT_C * CONV1_FILTERS * 3 * 3);
-    launch_sgd_update(d_conv5_bias_, d_grad_conv5_bias_, learning_rate, INPUT_C);
-}
-
-// Newly added: Complete GPU training loop with backward pass
 void AutoencoderGPU::train(const std::vector<float>& train_images,
-                            int num_images,
-                            int batch_size,
-                            int epochs,
-                            float learning_rate) {
-    std::cout << "\n" << std::string(60, '=') << std::endl;
-    std::cout << "         TRAINING CONFIGURATION" << std::endl;
-    std::cout << std::string(60, '=') << std::endl;
-    std::cout << "  Total Images    : " << num_images << std::endl;
-    std::cout << "  Batch Size      : " << batch_size << std::endl;
-    std::cout << "  Epochs          : " << epochs << std::endl;
-    std::cout << "  Learning Rate   : " << learning_rate << std::endl;
+                          int num_train_images,
+                          int batch_size,
+                          int epochs,
+                          float learning_rate) {
+    const int IMAGE_PIXELS = INPUT_C * INPUT_H * INPUT_W;
     
-    allocate_device_memory(batch_size);
+    // Calculate total batches
+    int total_batches = (num_train_images + batch_size - 1) / batch_size;
     
-    int num_batches = (num_images + batch_size - 1) / batch_size;
-    std::cout << "  Batches/Epoch   : " << num_batches << std::endl;
-    std::cout << "  Total Batches   : " << (num_batches * epochs) << std::endl;
-    std::cout << std::string(60, '=') << std::endl;
+    auto total_start = std::chrono::high_resolution_clock::now();
+    float total_images_processed = 0;
     
-    // Create CUDA events for timing
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    
-    cudaEventRecord(start);
-    
-    std::cout << "\nStarting training...\n" << std::endl;
-    
-    for (int epoch = 0; epoch < epochs; ++epoch) {
-        cudaEvent_t epoch_start, epoch_stop;
-        cudaEventCreate(&epoch_start);
-        cudaEventCreate(&epoch_stop);
-        cudaEventRecord(epoch_start);
+    for (int epoch = 0; epoch < epochs; epoch++) {
+        std::cout << "\nEpoch " << (epoch + 1) << "/" << epochs << std::endl;
         
         float epoch_loss = 0.0f;
-        // For large datasets, log every batch; for small datasets, log ~10 times per epoch
-        int log_interval = (num_batches > 100) ? 1 : std::max(1, num_batches / 10);
+        int seen = 0;
         
-        std::cout << "Epoch [" << (epoch + 1) << "/" << epochs << "]" << std::endl;
+        auto epoch_start = std::chrono::high_resolution_clock::now();
         
-        for (int batch = 0; batch < num_batches; ++batch) {
-            int start_idx = batch * batch_size;
-            int end_idx = std::min(start_idx + batch_size, num_images);
-            int actual_batch_size = end_idx - start_idx;
+        for (int start = 0; start < num_train_images; start += batch_size) {
+            int end = std::min(start + batch_size, num_train_images);
+            float batch_loss = 0.0f;
             
-            if (actual_batch_size != current_batch_size_) {
-                allocate_device_memory(actual_batch_size);
+            // Train on each image in batch
+            for (int i = start; i < end; i++) {
+                const float* img_data = &train_images[i * IMAGE_PIXELS];
+                batch_loss += train_step(img_data, learning_rate);
             }
             
-            const float* batch_data = &train_images[start_idx * INPUT_H * INPUT_W * INPUT_C];
+            batch_loss /= (end - start);
+            epoch_loss += batch_loss;
+            seen++;
+            total_images_processed += (end - start);
             
-            // Copy input to device
-            CUDA_CHECK(cudaMemcpy(d_input_, batch_data,
-                                 actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
-                                 cudaMemcpyHostToDevice));
-            
-            // Forward pass
-            forward_gpu(actual_batch_size);
-            
-            // Compute loss
-            float loss = compute_loss_gpu(actual_batch_size);
-            epoch_loss += loss;
-            
-            // Backward pass
-            backward_gpu(actual_batch_size);
-            
-            // Update weights
-            update_weights_gpu(learning_rate, actual_batch_size);
-            
-            // Log progress every N batches (host-side, no GPU sync needed)
-            if ((batch + 1) % log_interval == 0 || batch == num_batches - 1) {
-                float avg_loss = epoch_loss / (batch + 1);
-                float progress = 100.0f * (batch + 1) / num_batches;
-                std::cout << "  Batch [" << (batch + 1) << "/" << num_batches << "] "
-                          << "Avg Loss: " << std::setprecision(6) << avg_loss << std::endl;
-            }
+            int batch_num = start / batch_size + 1;
+            std::cout << "Batch [" << batch_num << "/" << total_batches << "] Avg Loss: " 
+                      << batch_loss << std::endl;
         }
         
-        cudaEventRecord(epoch_stop);
-        cudaEventSynchronize(epoch_stop);
+        epoch_loss /= seen;
         
-        float epoch_time;
-        cudaEventElapsedTime(&epoch_time, epoch_start, epoch_stop);
-        epoch_time /= 1000.0f;  // Convert to seconds
+        auto epoch_end = std::chrono::high_resolution_clock::now();
+        float epoch_time = std::chrono::duration<float>(epoch_end - epoch_start).count();
         
-        float avg_epoch_loss = epoch_loss / num_batches;
-        float imgs_per_sec = num_images / epoch_time;
-        
-        // Calculate ETA
-        float elapsed_epochs = epoch + 1;
-        float avg_time_per_epoch = epoch_time;  // Current epoch time
-        float remaining_epochs = epochs - elapsed_epochs;
-        float eta_seconds = remaining_epochs * avg_time_per_epoch;
-        int eta_minutes = (int)(eta_seconds / 60);
-        int eta_secs = (int)eta_seconds % 60;
-        
-        cudaEventDestroy(epoch_start);
-        cudaEventDestroy(epoch_stop);
+        std::cout << "Epoch avg loss: " << epoch_loss << " | Time: " << epoch_time << "s" << std::endl;
     }
     
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-    
-    float total_time;
-    cudaEventElapsedTime(&total_time, start, stop);
-    total_time /= 1000.0f;  // Convert to seconds
-    
-    int total_minutes = (int)(total_time / 60);
-    int total_secs = (int)total_time % 60;
+    // Training completed summary
+    auto total_end = std::chrono::high_resolution_clock::now();
+    float total_time = std::chrono::duration<float>(total_end - total_start).count();
+    int total_minutes = static_cast<int>(total_time) / 60;
+    int total_secs = static_cast<int>(total_time) % 60;
     float avg_epoch_time = total_time / epochs;
-    float total_images_processed = (float)num_images * epochs;
     float overall_throughput = total_images_processed / total_time;
     
     std::cout << "\n" << std::string(60, '=') << std::endl;
@@ -538,108 +263,154 @@ void AutoencoderGPU::train(const std::vector<float>& train_images,
               << std::fixed << std::setprecision(2) << total_time << "s)" << std::endl;
     std::cout << "  Avg Time/Epoch     : " << avg_epoch_time << "s" << std::endl;
     std::cout << "  Overall Throughput : " << std::setprecision(1) << overall_throughput << " images/sec" << std::endl;
-    std::cout << "  Total Images       : " << (int)total_images_processed << " (" 
-              << num_images << " × " << epochs << " epochs)" << std::endl;
-    std::cout << std::string(60, '=') << "\n" << std::endl;
-    
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
+    std::cout << "  Total Images       : " << static_cast<int>(total_images_processed) << " (" 
+              << num_train_images << " × " << epochs << " epochs)" << std::endl;
+    std::cout << std::string(60, '=') << std::endl;
 }
 
-void AutoencoderGPU::extract_features(const std::vector<float>& images,
-                                       int num_images,
-                                       std::vector<float>& features) {
-    features.resize(num_images * LATENT_DIM);
+void AutoencoderGPU::forward() {
+    // Conv1: (3, 32, 32) -> (256, 32, 32)
+    // kernel_size=3, stride=1, padding=1
+    launch_conv2d_forward(d_input, d_conv1_weight, d_conv1_bias, d_conv1_out,
+                         INPUT_C, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_H, INPUT_W, 3, 1, 1);
     
-    int batch_size = 64;
-    int num_batches = (num_images + batch_size - 1) / batch_size;
+    // ReLU1
+    launch_relu_forward(d_conv1_out, d_relu1_out, CONV1_FILTERS*INPUT_H*INPUT_W);
     
-    auto start = std::chrono::high_resolution_clock::now();
+    // MaxPool1: (256, 32, 32) -> (256, 16, 16)
+    // pool_size=2, stride=2
+    launch_maxpool_forward(d_relu1_out, d_pool1_out, CONV1_FILTERS, INPUT_H, INPUT_W, 2, 2);
     
-    for (int batch = 0; batch < num_batches; ++batch) {
-        int start_idx = batch * batch_size;
-        int end_idx = std::min(start_idx + batch_size, num_images);
-        int actual_batch_size = end_idx - start_idx;
-        
-        if (actual_batch_size != current_batch_size_) {
-            allocate_device_memory(actual_batch_size);
-        }
-        
-        const float* batch_data = &images[start_idx * INPUT_H * INPUT_W * INPUT_C];
-        
-        // Copy input to device
-        CUDA_CHECK(cudaMemcpy(d_input_, batch_data,
-                             actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
-                             cudaMemcpyHostToDevice));
-        
-        // Run encoder only
-        launch_conv2d_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
-                             actual_batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
-        launch_relu_forward(d_conv1_out_, actual_batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-        
-        launch_maxpool2d_forward(d_conv1_out_, d_pool1_out_, d_indices1_,
-                                actual_batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
-        
-        launch_conv2d_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
-                             actual_batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
-        launch_relu_forward(d_conv2_out_, actual_batch_size * 16 * 16 * CONV2_FILTERS);
-        
-        launch_maxpool2d_forward(d_conv2_out_, d_pool2_out_, d_indices2_,
-                                actual_batch_size, 16, 16, CONV2_FILTERS, 2, 2);
-        
-        // Copy latent features back to host
-        CUDA_CHECK(cudaMemcpy(&features[start_idx * LATENT_DIM],
-                             d_pool2_out_,
-                             actual_batch_size * LATENT_DIM * sizeof(float),
-                             cudaMemcpyDeviceToHost));
-    }
+    // Conv2: (256, 16, 16) -> (128, 16, 16)
+    // kernel_size=3, stride=1, padding=1
+    launch_conv2d_forward(d_pool1_out, d_conv2_weight, d_conv2_bias, d_conv2_out,
+                         CONV1_FILTERS, INPUT_H/2, INPUT_W/2, CONV2_FILTERS, INPUT_H/2, INPUT_W/2, 3, 1, 1);
     
-    auto end = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float>(end - start).count();
+    // ReLU2
+    launch_relu_forward(d_conv2_out, d_relu2_out, CONV2_FILTERS*(INPUT_H/2)*(INPUT_W/2));
     
-    std::cout << "Feature extraction completed in " << time << " seconds" << std::endl;
+    // MaxPool2: (128, 16, 16) -> (128, 8, 8)
+    // pool_size=2, stride=2
+    launch_maxpool_forward(d_relu2_out, d_pool2_out, CONV2_FILTERS, INPUT_H/2, INPUT_W/2, 2, 2);
+    
+    // === DECODER ===
+    
+    // Conv3: (128, 8, 8) -> (128, 8, 8)
+    // kernel_size=3, stride=1, padding=1
+    launch_conv2d_forward(d_pool2_out, d_conv3_weight, d_conv3_bias, d_conv3_out,
+                         LATENT_C, LATENT_H, LATENT_W, LATENT_C, LATENT_H, LATENT_W, 3, 1, 1);
+    
+    // ReLU3
+    launch_relu_forward(d_conv3_out, d_relu3_out, LATENT_C*LATENT_H*LATENT_W);
+    
+    // Upsample1: (128, 8, 8) -> (128, 16, 16)
+    // scale_factor=2
+    launch_upsample_forward(d_relu3_out, d_up1_out, LATENT_C, LATENT_H, LATENT_W, 2);
+    
+    // Conv4: (128, 16, 16) -> (256, 16, 16)
+    // kernel_size=3, stride=1, padding=1
+    launch_conv2d_forward(d_up1_out, d_conv4_weight, d_conv4_bias, d_conv4_out,
+                         LATENT_C, INPUT_H/2, INPUT_W/2, CONV1_FILTERS, INPUT_H/2, INPUT_W/2, 3, 1, 1);
+    
+    // ReLU4
+    launch_relu_forward(d_conv4_out, d_relu4_out, CONV1_FILTERS*(INPUT_H/2)*(INPUT_W/2));
+    
+    // Upsample2: (256, 16, 16) -> (256, 32, 32)
+    // scale_factor=2
+    launch_upsample_forward(d_relu4_out, d_up2_out, CONV1_FILTERS, INPUT_H/2, INPUT_W/2, 2);
+    
+    // Conv5: (256, 32, 32) -> (3, 32, 32) [No activation]
+    // kernel_size=3, stride=1, padding=1
+    launch_conv2d_forward(d_up2_out, d_conv5_weight, d_conv5_bias, d_conv5_out,
+                         CONV1_FILTERS, INPUT_H, INPUT_W, INPUT_C, INPUT_H, INPUT_W, 3, 1, 1);
 }
 
-void AutoencoderGPU::infer(const std::vector<float>& images,
-                            int num_images,
-                            std::vector<float>& reconstructions) {
-    reconstructions.resize(num_images * INPUT_H * INPUT_W * INPUT_C);
+void AutoencoderGPU::backward() {
+    CUDA_CHECK(cudaMemset(d_grad_relu1, 0, CONV1_FILTERS * INPUT_H * INPUT_W * sizeof(float)));
+    CUDA_CHECK(cudaMemset(d_grad_relu2, 0, CONV2_FILTERS * (INPUT_H/2) * (INPUT_W/2) * sizeof(float)));
     
-    int batch_size = 64;
-    int num_batches = (num_images + batch_size - 1) / batch_size;
+    // Conv5 backward - kernel_size=3, stride=1, padding=1
+    launch_conv2d_weight_grad(d_grad_conv5, d_up2_out, d_conv5_weight_grad,
+                             CONV1_FILTERS, INPUT_H, INPUT_W, INPUT_C, INPUT_H, INPUT_W, 3, 1, 1);
     
-    auto start = std::chrono::high_resolution_clock::now();
+    launch_conv2d_bias_grad(d_grad_conv5, d_conv5_bias_grad, INPUT_C, INPUT_H, INPUT_W);
     
-    for (int batch = 0; batch < num_batches; ++batch) {
-        int start_idx = batch * batch_size;
-        int end_idx = std::min(start_idx + batch_size, num_images);
-        int actual_batch_size = end_idx - start_idx;
-        
-        if (actual_batch_size != current_batch_size_) {
-            allocate_device_memory(actual_batch_size);
-        }
-        
-        const float* batch_data = &images[start_idx * INPUT_H * INPUT_W * INPUT_C];
-        
-        // Copy input to device
-        CUDA_CHECK(cudaMemcpy(d_input_, batch_data,
-                             actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
-                             cudaMemcpyHostToDevice));
-        
-        // Run full forward pass (encoder + decoder)
-        forward_gpu(actual_batch_size);
-        
-        // Copy reconstructed output back to host
-        CUDA_CHECK(cudaMemcpy(&reconstructions[start_idx * INPUT_H * INPUT_W * INPUT_C],
-                             d_conv5_out_,
-                             actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
-                             cudaMemcpyDeviceToHost));
-    }
+    launch_conv2d_input_grad(d_grad_conv5, d_conv5_weight, d_grad_up2,
+                            CONV1_FILTERS, INPUT_H, INPUT_W, INPUT_C, INPUT_H, INPUT_W, 3, 1, 1);
     
-    auto end = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float>(end - start).count();
+    // Upsample2 backward - scale_factor=2
+    launch_upsample_backward(d_grad_up2, d_grad_relu4, CONV1_FILTERS, INPUT_H/2, INPUT_W/2, 2);
     
-    std::cout << "Inference completed on " << num_images << " images in " << time << " seconds" << std::endl;
+    // ReLU4 backward
+    launch_relu_backward(d_grad_relu4, d_conv4_out, d_grad_conv4, CONV1_FILTERS*(INPUT_H/2)*(INPUT_W/2));
+    
+    // Conv4 backward - kernel_size=3, stride=1, padding=1
+    launch_conv2d_weight_grad(d_grad_conv4, d_up1_out, d_conv4_weight_grad,
+                             LATENT_C, INPUT_H/2, INPUT_W/2, CONV1_FILTERS, INPUT_H/2, INPUT_W/2, 3, 1, 1);
+    
+    launch_conv2d_bias_grad(d_grad_conv4, d_conv4_bias_grad, CONV1_FILTERS, INPUT_H/2, INPUT_W/2);
+    
+    launch_conv2d_input_grad(d_grad_conv4, d_conv4_weight, d_grad_up1,
+                            LATENT_C, INPUT_H/2, INPUT_W/2, CONV1_FILTERS, INPUT_H/2, INPUT_W/2, 3, 1, 1);
+    
+    // Upsample1 backward - scale_factor=2
+    launch_upsample_backward(d_grad_up1, d_grad_relu3, LATENT_C, LATENT_H, LATENT_W, 2);
+    
+    // ReLU3 backward
+    launch_relu_backward(d_grad_relu3, d_conv3_out, d_grad_conv3, LATENT_C*LATENT_H*LATENT_W);
+    
+    // Conv3 backward - kernel_size=3, stride=1, padding=1
+    launch_conv2d_weight_grad(d_grad_conv3, d_pool2_out, d_conv3_weight_grad,
+                             LATENT_C, LATENT_H, LATENT_W, LATENT_C, LATENT_H, LATENT_W, 3, 1, 1);
+    
+    launch_conv2d_bias_grad(d_grad_conv3, d_conv3_bias_grad, LATENT_C, LATENT_H, LATENT_W);
+    
+    launch_conv2d_input_grad(d_grad_conv3, d_conv3_weight, d_grad_pool2,
+                            LATENT_C, LATENT_H, LATENT_W, LATENT_C, LATENT_H, LATENT_W, 3, 1, 1);
+    
+    // MaxPool2 backward - pool_size=2, stride=2
+    launch_maxpool_backward(d_grad_pool2, d_relu2_out, d_grad_relu2, CONV2_FILTERS, INPUT_H/2, INPUT_W/2, 2, 2);
+    
+    // ReLU2 backward
+    launch_relu_backward(d_grad_relu2, d_conv2_out, d_grad_conv2, CONV2_FILTERS*(INPUT_H/2)*(INPUT_W/2));
+    
+    // Conv2 backward - kernel_size=3, stride=1, padding=1
+    launch_conv2d_weight_grad(d_grad_conv2, d_pool1_out, d_conv2_weight_grad,
+                             CONV1_FILTERS, INPUT_H/2, INPUT_W/2, CONV2_FILTERS, INPUT_H/2, INPUT_W/2, 3, 1, 1);
+    
+    launch_conv2d_bias_grad(d_grad_conv2, d_conv2_bias_grad, CONV2_FILTERS, INPUT_H/2, INPUT_W/2);
+    
+    launch_conv2d_input_grad(d_grad_conv2, d_conv2_weight, d_grad_pool1,
+                            CONV1_FILTERS, INPUT_H/2, INPUT_W/2, CONV2_FILTERS, INPUT_H/2, INPUT_W/2, 3, 1, 1);
+    
+    // MaxPool1 backward - pool_size=2, stride=2
+    launch_maxpool_backward(d_grad_pool1, d_relu1_out, d_grad_relu1, CONV1_FILTERS, INPUT_H, INPUT_W, 2, 2);
+    
+    // ReLU1 backward
+    launch_relu_backward(d_grad_relu1, d_conv1_out, d_grad_conv1, CONV1_FILTERS*INPUT_H*INPUT_W);
+    
+    // Conv1 backward - kernel_size=3, stride=1, padding=1
+    launch_conv2d_weight_grad(d_grad_conv1, d_input, d_conv1_weight_grad,
+                             INPUT_C, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_H, INPUT_W, 3, 1, 1);
+    
+    launch_conv2d_bias_grad(d_grad_conv1, d_conv1_bias_grad, CONV1_FILTERS, INPUT_H, INPUT_W);
+}
+
+void AutoencoderGPU::update_weights(float learning_rate) {
+    launch_sgd_update(d_conv1_weight, d_conv1_weight_grad, learning_rate, CONV1_FILTERS * INPUT_C * 3 * 3);
+    launch_sgd_update(d_conv1_bias, d_conv1_bias_grad, learning_rate, CONV1_FILTERS);
+    
+    launch_sgd_update(d_conv2_weight, d_conv2_weight_grad, learning_rate, CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
+    launch_sgd_update(d_conv2_bias, d_conv2_bias_grad, learning_rate, CONV2_FILTERS);
+    
+    launch_sgd_update(d_conv3_weight, d_conv3_weight_grad, learning_rate, LATENT_C * LATENT_C * 3 * 3);
+    launch_sgd_update(d_conv3_bias, d_conv3_bias_grad, learning_rate, LATENT_C);
+    
+    launch_sgd_update(d_conv4_weight, d_conv4_weight_grad, learning_rate, CONV1_FILTERS * LATENT_C * 3 * 3);
+    launch_sgd_update(d_conv4_bias, d_conv4_bias_grad, learning_rate, CONV1_FILTERS);
+    
+    launch_sgd_update(d_conv5_weight, d_conv5_weight_grad, learning_rate, INPUT_C * CONV1_FILTERS * 3 * 3);
+    launch_sgd_update(d_conv5_bias, d_conv5_bias_grad, learning_rate, INPUT_C);
 }
 
 void AutoencoderGPU::save_weights(const std::string& filepath) {
@@ -656,16 +427,16 @@ void AutoencoderGPU::save_weights(const std::string& filepath) {
         file.write(reinterpret_cast<const char*>(h_data.data()), size * sizeof(float));
     };
     
-    save_tensor(d_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3);
-    save_tensor(d_conv1_bias_, CONV1_FILTERS);
-    save_tensor(d_conv2_weights_, CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
-    save_tensor(d_conv2_bias_, CONV2_FILTERS);
-    save_tensor(d_conv3_weights_, LATENT_C * LATENT_C * 3 * 3);
-    save_tensor(d_conv3_bias_, LATENT_C);
-    save_tensor(d_conv4_weights_, CONV1_FILTERS * LATENT_C * 3 * 3);
-    save_tensor(d_conv4_bias_, CONV1_FILTERS);
-    save_tensor(d_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3);
-    save_tensor(d_conv5_bias_, INPUT_C);
+    save_tensor(d_conv1_weight, CONV1_FILTERS * INPUT_C * 3 * 3);
+    save_tensor(d_conv1_bias, CONV1_FILTERS);
+    save_tensor(d_conv2_weight, CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
+    save_tensor(d_conv2_bias, CONV2_FILTERS);
+    save_tensor(d_conv3_weight, LATENT_C * LATENT_C * 3 * 3);
+    save_tensor(d_conv3_bias, LATENT_C);
+    save_tensor(d_conv4_weight, CONV1_FILTERS * LATENT_C * 3 * 3);
+    save_tensor(d_conv4_bias, CONV1_FILTERS);
+    save_tensor(d_conv5_weight, INPUT_C * CONV1_FILTERS * 3 * 3);
+    save_tensor(d_conv5_bias, INPUT_C);
     
     file.close();
     std::cout << "Weights saved to " << filepath << std::endl;
@@ -687,25 +458,61 @@ void AutoencoderGPU::load_weights(const std::string& filepath) {
         }
         std::vector<float> h_data(size);
         file.read(reinterpret_cast<char*>(h_data.data()), size * sizeof(float));
+        if (!file.good()) {
+            std::cerr << "Failed to read tensor data" << std::endl;
+            return;
+        }
         CUDA_CHECK(cudaMemcpy(d_ptr, h_data.data(), size * sizeof(float), cudaMemcpyHostToDevice));
     };
     
-    load_tensor(d_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3);
-    load_tensor(d_conv1_bias_, CONV1_FILTERS);
-    load_tensor(d_conv2_weights_, CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
-    load_tensor(d_conv2_bias_, CONV2_FILTERS);
-    load_tensor(d_conv3_weights_, LATENT_C * LATENT_C * 3 * 3);
-    load_tensor(d_conv3_bias_, LATENT_C);
-    load_tensor(d_conv4_weights_, CONV1_FILTERS * LATENT_C * 3 * 3);
-    load_tensor(d_conv4_bias_, CONV1_FILTERS);
-    load_tensor(d_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3);
-    load_tensor(d_conv5_bias_, INPUT_C);
+    load_tensor(d_conv1_weight, CONV1_FILTERS * INPUT_C * 3 * 3);
+    load_tensor(d_conv1_bias, CONV1_FILTERS);
+    load_tensor(d_conv2_weight, CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
+    load_tensor(d_conv2_bias, CONV2_FILTERS);
+    load_tensor(d_conv3_weight, LATENT_C * LATENT_C * 3 * 3);
+    load_tensor(d_conv3_bias, LATENT_C);
+    load_tensor(d_conv4_weight, CONV1_FILTERS * LATENT_C * 3 * 3);
+    load_tensor(d_conv4_bias, CONV1_FILTERS);
+    load_tensor(d_conv5_weight, INPUT_C * CONV1_FILTERS * 3 * 3);
+    load_tensor(d_conv5_bias, INPUT_C);
     
     file.close();
     std::cout << "Weights loaded from " << filepath << std::endl;
 }
 
-void AutoencoderGPU::copy_weights_from_cpu(const std::string& cpu_weights_path) {
-    load_weights(cpu_weights_path);
+void AutoencoderGPU::extract_features(const float* input_chw, float* output_features) {
+    // Copy input to device
+    CUDA_CHECK(cudaMemcpy(d_input, input_chw, INPUT_C*INPUT_H*INPUT_W*sizeof(float), cudaMemcpyHostToDevice));
+    
+    // Run encoder only (stop at bottleneck)
+    
+    // Conv1: (3, 32, 32) -> (256, 32, 32)
+    // kernel_size=3, stride=1, padding=1
+    launch_conv2d_forward(d_input, d_conv1_weight, d_conv1_bias, d_conv1_out,
+                         INPUT_C, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_H, INPUT_W, 3, 1, 1);
+    
+    // ReLU1
+    launch_relu_forward(d_conv1_out, d_relu1_out, CONV1_FILTERS*INPUT_H*INPUT_W);
+    
+    // MaxPool1: (256, 32, 32) -> (256, 16, 16)
+    // pool_size=2, stride=2
+    launch_maxpool_forward(d_relu1_out, d_pool1_out, CONV1_FILTERS, INPUT_H, INPUT_W, 2, 2);
+    
+    // Conv2: (256, 16, 16) -> (128, 16, 16)
+    // kernel_size=3, stride=1, padding=1
+    launch_conv2d_forward(d_pool1_out, d_conv2_weight, d_conv2_bias, d_conv2_out,
+                         CONV1_FILTERS, INPUT_H/2, INPUT_W/2, CONV2_FILTERS, INPUT_H/2, INPUT_W/2, 3, 1, 1);
+    
+    // ReLU2
+    launch_relu_forward(d_conv2_out, d_relu2_out, CONV2_FILTERS*(INPUT_H/2)*(INPUT_W/2));
+    
+    // MaxPool2: (128, 16, 16) -> (128, 8, 8) - BOTTLENECK/FEATURES
+    // pool_size=2, stride=2
+    launch_maxpool_forward(d_relu2_out, d_pool2_out, CONV2_FILTERS, INPUT_H/2, INPUT_W/2, 2, 2);
+    
+    CUDA_CHECK(cudaDeviceSynchronize());
+    
+    // Copy features from device to host
+    // d_pool2_out contains LATENT_DIM features
+    CUDA_CHECK(cudaMemcpy(output_features, d_pool2_out, LATENT_DIM*sizeof(float), cudaMemcpyDeviceToHost));
 }
-

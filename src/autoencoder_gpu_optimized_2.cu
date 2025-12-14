@@ -286,28 +286,28 @@ float AutoencoderGPUOptimized2::compute_loss_gpu(int batch_size) {
 void AutoencoderGPUOptimized2::backward_gpu_optimized(int batch_size) {
     int size = batch_size * INPUT_H * INPUT_W * INPUT_C;
     
-    // Zero out all gradients for weights and biases
-    launch_zero_grad(d_grad_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3);
-    launch_zero_grad(d_grad_conv1_bias_, CONV1_FILTERS);
-    launch_zero_grad(d_grad_conv2_weights_, CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
-    launch_zero_grad(d_grad_conv2_bias_, CONV2_FILTERS);
-    launch_zero_grad(d_grad_conv3_weights_, LATENT_C * LATENT_C * 3 * 3);
-    launch_zero_grad(d_grad_conv3_bias_, LATENT_C);
-    launch_zero_grad(d_grad_conv4_weights_, CONV1_FILTERS * LATENT_C * 3 * 3);
-    launch_zero_grad(d_grad_conv4_bias_, CONV1_FILTERS);
-    launch_zero_grad(d_grad_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3);
-    launch_zero_grad(d_grad_conv5_bias_, INPUT_C);
+    // FIX: Batch zero gradients with cudaMemsetAsync (faster than multiple kernel calls)
+    cudaMemsetAsync(d_grad_conv1_weights_, 0, CONV1_FILTERS * INPUT_C * 3 * 3 * sizeof(float));
+    cudaMemsetAsync(d_grad_conv1_bias_, 0, CONV1_FILTERS * sizeof(float));
+    cudaMemsetAsync(d_grad_conv2_weights_, 0, CONV2_FILTERS * CONV1_FILTERS * 3 * 3 * sizeof(float));
+    cudaMemsetAsync(d_grad_conv2_bias_, 0, CONV2_FILTERS * sizeof(float));
+    cudaMemsetAsync(d_grad_conv3_weights_, 0, LATENT_C * LATENT_C * 3 * 3 * sizeof(float));
+    cudaMemsetAsync(d_grad_conv3_bias_, 0, LATENT_C * sizeof(float));
+    cudaMemsetAsync(d_grad_conv4_weights_, 0, CONV1_FILTERS * LATENT_C * 3 * 3 * sizeof(float));
+    cudaMemsetAsync(d_grad_conv4_bias_, 0, CONV1_FILTERS * sizeof(float));
+    cudaMemsetAsync(d_grad_conv5_weights_, 0, INPUT_C * CONV1_FILTERS * 3 * 3 * sizeof(float));
+    cudaMemsetAsync(d_grad_conv5_bias_, 0, INPUT_C * sizeof(float));
     
     // Zero out activation gradients
-    launch_zero_grad(d_grad_conv5_out_, batch_size * INPUT_H * INPUT_W * INPUT_C);
-    launch_zero_grad(d_grad_up2_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-    launch_zero_grad(d_grad_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS);
-    launch_zero_grad(d_grad_up1_out_, batch_size * 16 * 16 * LATENT_C);
-    launch_zero_grad(d_grad_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
-    launch_zero_grad(d_grad_pool2_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
-    launch_zero_grad(d_grad_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS);
-    launch_zero_grad(d_grad_pool1_out_, batch_size * 16 * 16 * CONV1_FILTERS);
-    launch_zero_grad(d_grad_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
+    cudaMemsetAsync(d_grad_conv5_out_, 0, batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float));
+    cudaMemsetAsync(d_grad_up2_out_, 0, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float));
+    cudaMemsetAsync(d_grad_conv4_out_, 0, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float));
+    cudaMemsetAsync(d_grad_up1_out_, 0, batch_size * 16 * 16 * LATENT_C * sizeof(float));
+    cudaMemsetAsync(d_grad_conv3_out_, 0, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float));
+    cudaMemsetAsync(d_grad_pool2_out_, 0, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float));
+    cudaMemsetAsync(d_grad_conv2_out_, 0, batch_size * 16 * 16 * CONV2_FILTERS * sizeof(float));
+    cudaMemsetAsync(d_grad_pool1_out_, 0, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float));
+    cudaMemsetAsync(d_grad_conv1_out_, 0, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float));
     
     // Compute gradient of loss w.r.t. output
     launch_mse_loss_backward(d_conv5_out_, d_input_, d_grad_conv5_out_, size);
@@ -426,6 +426,7 @@ void AutoencoderGPUOptimized2::train(const std::vector<float>& train_images,
     std::cout << "Images: " << num_images << ", Batch size: " << batch_size 
               << ", Epochs: " << epochs << ", LR: " << learning_rate << std::endl;
     
+    // FIX: Allocate for max batch size once to avoid reallocation
     allocate_device_memory(batch_size);
     
     int num_batches = (num_images + batch_size - 1) / batch_size;
@@ -450,13 +451,16 @@ void AutoencoderGPUOptimized2::train(const std::vector<float>& train_images,
 
         
         for (int batch = 0; batch < num_batches; ++batch) {
+            cudaEvent_t batch_start, batch_stop;
+            cudaEventCreate(&batch_start);
+            cudaEventCreate(&batch_stop);
+            cudaEventRecord(batch_start);
+            
             int start_idx = batch * batch_size;
             int end_idx = std::min(start_idx + batch_size, num_images);
             int actual_batch_size = end_idx - start_idx;
             
-            if (actual_batch_size != current_batch_size_) {
-                allocate_device_memory(actual_batch_size);
-            }
+            // FIX: No reallocation - use actual_batch_size in kernels only
             
             const float* batch_data = &train_images[start_idx * INPUT_H * INPUT_W * INPUT_C];
             
@@ -478,12 +482,22 @@ void AutoencoderGPUOptimized2::train(const std::vector<float>& train_images,
             // Update weights
             update_weights_gpu(learning_rate, actual_batch_size);
             
+            cudaEventRecord(batch_stop);
+            cudaEventSynchronize(batch_stop);
+            
+            float batch_time;
+            cudaEventElapsedTime(&batch_time, batch_start, batch_stop);
+            
             if ((batch + 1) % log_interval == 0 || batch == num_batches - 1) {
                 float avg_loss = epoch_loss / (batch + 1);
                 float progress = 100.0f * (batch + 1) / num_batches;
                 std::cout << "  Batch [" << (batch + 1) << "/" << num_batches << "] "
-                          << "Avg Loss: " << avg_loss << std::endl;
+                          << "Avg Loss: " << avg_loss 
+                          << " - Time: " << (batch_time / 1000.0f) << "s" << std::endl;
             }
+            
+            cudaEventDestroy(batch_start);
+            cudaEventDestroy(batch_stop);
         }
         
         cudaEventRecord(epoch_stop);

@@ -19,6 +19,7 @@ phase4
 # Model weights and results
 weights/*.weights
 weights/*.model
+weights/*.bin
 results/*.txt
 results/*.csv
 results/*.png
@@ -85,4 +86,5 @@ third_lib/libsvm
 third_lib/cuml
 third_lib/thundersvm
 
-features/gpu_optimized_1/
+features/gpu_*
+features/cpu_*
