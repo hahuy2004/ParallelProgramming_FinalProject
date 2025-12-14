@@ -18,6 +18,7 @@ results/*.txt
 results/*.csv
 results/*.png
 results/*.jpg
+results/naive_gpu_inference
 
 # Dataset (too large for git)
 cifar-10-batches-bin/
