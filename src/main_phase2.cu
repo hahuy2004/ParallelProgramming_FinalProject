@@ -40,15 +40,11 @@ int main(int argc, char** argv) {
               << " images over " << epochs << " epochs" << std::endl;
     std::cout << "Expected time: ~" << (loader.get_train_size() * epochs / 1024 * 77.5 / 60) 
               << " minutes (estimated from test runs)" << std::endl;
-    AutoencoderGPU autoencoder;
+    AutoencoderGPU autoencoder(batch_size, learning_rate);
     
     auto train_start = std::chrono::high_resolution_clock::now();
     
-    autoencoder.train(train_images,
-                     num_train_images,
-                     batch_size,
-                     epochs,
-                     learning_rate);
+    autoencoder.train(train_images, num_train_images, epochs);
     
     auto train_end = std::chrono::high_resolution_clock::now();
     float train_time = std::chrono::duration<float>(train_end - train_start).count();

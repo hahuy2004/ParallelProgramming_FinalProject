@@ -233,6 +233,8 @@ void AutoencoderGPUOptimized2::free_device_memory() {
     if (d_loss_) cudaFree(d_loss_);
 }
 
+
+
 void AutoencoderGPUOptimized2::forward_gpu_optimized(int batch_size) {
     // Encoder with FUSED operations
     // Fused Conv2D + ReLU + Bias

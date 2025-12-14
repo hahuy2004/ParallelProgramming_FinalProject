@@ -228,11 +228,24 @@ void launch_zero_grad(float* d_grad, int size) {
     CUDA_CHECK(cudaGetLastError());
 }
 
-__global__ void sgd_update_kernel(float* weights, const float* grad,
-                                  float learning_rate, int size) {
+__global__ void sgd_update_kernel(
+    float* weight,
+    const float* grad,
+    float learning_rate,
+    int size)
+{
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < size) {
-        weights[idx] -= learning_rate * grad[idx];
+        float g = grad[idx];
+        // Check for NaN/Inf first
+        if (isnan(g) || isinf(g)) {
+            g = 0.0f;
+        } else {
+            // Clip gradient to prevent explosion
+            if (g > 5.0f) g = 5.0f;
+            if (g < -5.0f) g = -5.0f;
+        }
+        weight[idx] -= learning_rate * g;
     }
 }
 
@@ -245,61 +258,6 @@ void launch_sgd_update(float* d_weights, const float* d_grad,
     CUDA_CHECK(cudaGetLastError());
 }
 
-// ==================== Fused Convolution + ReLU (Optimized) ====================
-__global__ void conv2d_relu_forward_kernel(const float* input, float* output,
-                                           const float* weights, const float* bias,
-                                           int batch, int in_h, int in_w, int in_c, int out_h, int out_w,
-                                           int out_c, int kernel_size, int stride, int padding) {
-    
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int total = batch * out_h * out_w * out_c;
-    
-    if (idx < total) {
-        int oc = idx % out_c;
-        int ow = (idx / out_c) % out_w;
-        int oh = (idx / out_c / out_w) % out_h;
-        int b = idx / out_c / out_w / out_h;
-        
-        float sum = bias[oc];
-        
-        for (int ic = 0; ic < in_c; ++ic) {
-            for (int kh = 0; kh < kernel_size; ++kh) {
-                for (int kw = 0; kw < kernel_size; ++kw) {
-                    int ih = oh * stride - padding + kh;
-                    int iw = ow * stride - padding + kw;
-                    
-                    if (ih >= 0 && ih < in_h && iw >= 0 && iw < in_w) {
-                        int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + ic;
-                        int w_idx = oc * in_c * kernel_size * kernel_size + 
-                                   ic * kernel_size * kernel_size + kh * kernel_size + kw;
-                        sum += input[in_idx] * weights[w_idx];
-                    }
-                }
-            }
-        }
-        
-        // Fused ReLU activation
-        output[idx] = fmaxf(0.0f, sum);
-    }
-}
-
-void launch_conv2d_relu_forward(const float* d_input, float* d_output,
-                                const float* d_weights, const float* d_bias,
-                                int batch, int in_h, int in_w, int in_c,
-                                int out_c, int kernel_size, int stride, int padding) {
-    int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
-    int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
-    int total = batch * out_h * out_w * out_c;
-    
-    int block_size = 256;
-    int grid_size = (total + block_size - 1) / block_size;
-    
-    conv2d_relu_forward_kernel<<<grid_size, block_size>>>(
-        d_input, d_output, d_weights, d_bias,
-        batch, in_h, in_w, in_c, out_h, out_w, out_c, kernel_size, stride, padding);
-    
-    CUDA_CHECK(cudaGetLastError());
-}
 
 // ==================== BACKWARD PASS KERNELS ====================
 
@@ -356,7 +314,7 @@ void launch_conv2d_backward(const float* d_grad_output, const float* d_input,
     int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
     int total = batch * out_h * out_w * out_c;
     
-    int block_size = 256;
+    int block_size = 512;
     int grid_size = (total + block_size - 1) / block_size;
     
     conv2d_backward_kernel<<<grid_size, block_size>>>(

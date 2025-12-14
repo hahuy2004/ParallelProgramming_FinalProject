@@ -1,107 +1,82 @@
-#ifndef AUTOENCODER_GPU_H
-#define AUTOENCODER_GPU_H
+#ifndef AUTOENCODER_H
+#define AUTOENCODER_H
 
-#include <vector>
 #include <string>
+#include <vector>
 
-class AutoencoderGPU {
-public:
-    AutoencoderGPU();
-    ~AutoencoderGPU();
-
-    // Training
-    void train(const std::vector<float>& train_images, 
-               int num_images,
-               int batch_size, 
-               int epochs, 
-               float learning_rate);
+// Layer structure to hold weights and gradients
+struct ConvLayer {
+    float *d_weights;
+    float *d_bias;
+    float *d_grad_weights;
+    float *d_grad_bias;
+    int in_c, out_c, kernel_size;
+    int weight_size, bias_size;
     
-    // Feature extraction (encoder only)
-    void extract_features(const std::vector<float>& images,
-                         int num_images,
-                         std::vector<float>& features);
-    
-    // Save/Load weights
-    void save_weights(const std::string& filepath);
-    void load_weights(const std::string& filepath);
-    
-    // Copy weights from CPU version
-    void copy_weights_from_cpu(const std::string& cpu_weights_path);
-
-private:
-    // Network architecture parameters (same as CPU)
-    static constexpr int INPUT_H = 32;
-    static constexpr int INPUT_W = 32;
-    static constexpr int INPUT_C = 3;
-    
-    static constexpr int CONV1_FILTERS = 256;
-    static constexpr int CONV2_FILTERS = 128;
-    static constexpr int LATENT_H = 8;
-    static constexpr int LATENT_W = 8;
-    static constexpr int LATENT_C = 128;
-    static constexpr int LATENT_DIM = LATENT_H * LATENT_W * LATENT_C;
-    
-    // Device pointers for weights
-    float* d_conv1_weights_;
-    float* d_conv1_bias_;
-    float* d_conv2_weights_;
-    float* d_conv2_bias_;
-    float* d_conv3_weights_;
-    float* d_conv3_bias_;
-    float* d_conv4_weights_;
-    float* d_conv4_bias_;
-    float* d_conv5_weights_;
-    float* d_conv5_bias_;
-    
-    // Device pointers for activations
-    float* d_input_;
-    float* d_conv1_out_;
-    float* d_pool1_out_;
-    float* d_indices1_;
-    float* d_conv2_out_;
-    float* d_pool2_out_;
-    float* d_indices2_;
-    float* d_conv3_out_;
-    float* d_up1_out_;
-    float* d_conv4_out_;
-    float* d_up2_out_;
-    float* d_conv5_out_;
-    
-    // Device pointers for gradients
-    float* d_grad_conv5_out_;
-    float* d_grad_up2_out_;
-    float* d_grad_conv4_out_;
-    float* d_grad_up1_out_;
-    float* d_grad_conv3_out_;
-    float* d_grad_pool2_out_;
-    float* d_grad_conv2_out_;
-    float* d_grad_pool1_out_;
-    float* d_grad_conv1_out_;
-    
-    float* d_grad_conv1_weights_;
-    float* d_grad_conv1_bias_;
-    float* d_grad_conv2_weights_;
-    float* d_grad_conv2_bias_;
-    float* d_grad_conv3_weights_;
-    float* d_grad_conv3_bias_;
-    float* d_grad_conv4_weights_;
-    float* d_grad_conv4_bias_;
-    float* d_grad_conv5_weights_;
-    float* d_grad_conv5_bias_;
-    
-    float* d_loss_;  // For computing loss on device
-    
-    int current_batch_size_;
-    
-    void initialize_weights();
-    void allocate_device_memory(int batch_size);
-    void free_device_memory();
-    
-    void forward_gpu(int batch_size);
-    void backward_gpu(int batch_size);
-    void update_weights_gpu(float learning_rate, int batch_size);
-    
-    float compute_loss_gpu(int batch_size);
+    ConvLayer(int in_channels, int out_channels, int k_size);
+    ~ConvLayer();
 };
 
-#endif // AUTOENCODER_GPU_H
+// Autoencoder class
+class Autoencoder {
+private:
+    // Encoder layers
+    ConvLayer *conv1;  // 3 -> 256
+    ConvLayer *conv2;  // 256 -> 128
+    
+    // Decoder layers
+    ConvLayer *conv3;  // 128 -> 128
+    ConvLayer *conv4;  // 128 -> 256
+    ConvLayer *conv5;  // 256 -> 3
+    
+    // Intermediate activations and gradients
+    float *d_enc1, *d_enc1_relu, *d_enc1_pool;
+    float *d_enc2, *d_enc2_relu, *d_latent;
+    float *d_dec1, *d_dec1_relu, *d_dec1_up;
+    float *d_dec2, *d_dec2_relu, *d_dec2_up;
+    float *d_output;
+    
+    // Gradients for backward pass
+    float *d_grad_output;
+    float *d_grad_dec2_up, *d_grad_dec2_relu, *d_grad_dec2;
+    float *d_grad_dec1_up, *d_grad_dec1_relu, *d_grad_dec1;
+    float *d_grad_latent;
+    float *d_grad_enc2_relu, *d_grad_enc2, *d_grad_enc1_pool;
+    float *d_grad_enc1_relu, *d_grad_enc1;
+    
+    // MaxPool indices
+    float *d_pool1_indices, *d_pool2_indices;
+    
+    // Loss
+    float *d_loss;
+    
+    int batch_size;
+    float learning_rate;
+    
+public:
+    Autoencoder(int batch, float lr = 0.001f);
+    ~Autoencoder();
+    
+    // Forward pass
+    float forward(const float* d_input, const float* d_target);
+    
+    // Backward pass
+    void backward(const float* d_input, const float* d_target);
+    
+    // Update weights using SGD
+    void update_weights();
+    
+    // Save weights to file
+    void save_weights(const std::string& filename);
+    
+    // Load weights from file
+    void load_weights(const std::string& filename);
+    
+    // Get output for inference
+    void get_output(float* h_output);
+
+    void train(const std::vector<float>& train_data, 
+                      int num_samples, int epochs)
+};
+
+#endif // AUTOENCODER_H
