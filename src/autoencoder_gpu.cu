@@ -280,119 +280,128 @@ void AutoencoderGPU::train(const std::vector<float>& train_images,
 
 void AutoencoderGPU::forward() {
     // Conv1: (3, 32, 32) -> (256, 32, 32)
+    // kernel_size=3, stride=1, padding=1
     launch_conv2d_forward(d_input, d_conv1_weight, d_conv1_bias, d_conv1_out,
-                         3, 32, 32, 256, 32, 32, 3, 1);
+                         3, 32, 32, 256, 32, 32, 3, 1, 1);
     
     // ReLU1
     launch_relu_forward(d_conv1_out, d_relu1_out, 256*32*32);
     
     // MaxPool1: (256, 32, 32) -> (256, 16, 16)
-    launch_maxpool_forward(d_relu1_out, d_pool1_out, 256, 32, 32);
+    // pool_size=2, stride=2
+    launch_maxpool_forward(d_relu1_out, d_pool1_out, 256, 32, 32, 2, 2);
     
     // Conv2: (256, 16, 16) -> (128, 16, 16)
+    // kernel_size=3, stride=1, padding=1
     launch_conv2d_forward(d_pool1_out, d_conv2_weight, d_conv2_bias, d_conv2_out,
-                         256, 16, 16, 128, 16, 16, 3, 1);
+                         256, 16, 16, 128, 16, 16, 3, 1, 1);
     
     // ReLU2
     launch_relu_forward(d_conv2_out, d_relu2_out, 128*16*16);
     
     // MaxPool2: (128, 16, 16) -> (128, 8, 8)
-    launch_maxpool_forward(d_relu2_out, d_pool2_out, 128, 16, 16);
+    // pool_size=2, stride=2
+    launch_maxpool_forward(d_relu2_out, d_pool2_out, 128, 16, 16, 2, 2);
     
     // === DECODER ===
     
     // Conv3: (128, 8, 8) -> (128, 8, 8)
+    // kernel_size=3, stride=1, padding=1
     launch_conv2d_forward(d_pool2_out, d_conv3_weight, d_conv3_bias, d_conv3_out,
-                         128, 8, 8, 128, 8, 8, 3, 1);
+                         128, 8, 8, 128, 8, 8, 3, 1, 1);
     
     // ReLU3
     launch_relu_forward(d_conv3_out, d_relu3_out, 128*8*8);
     
     // Upsample1: (128, 8, 8) -> (128, 16, 16)
-    launch_upsample_forward(d_relu3_out, d_up1_out, 128, 8, 8);
+    // scale_factor=2
+    launch_upsample_forward(d_relu3_out, d_up1_out, 128, 8, 8, 2);
     
     // Conv4: (128, 16, 16) -> (256, 16, 16)
+    // kernel_size=3, stride=1, padding=1
     launch_conv2d_forward(d_up1_out, d_conv4_weight, d_conv4_bias, d_conv4_out,
-                         128, 16, 16, 256, 16, 16, 3, 1);
+                         128, 16, 16, 256, 16, 16, 3, 1, 1);
     
     // ReLU4
     launch_relu_forward(d_conv4_out, d_relu4_out, 256*16*16);
     
     // Upsample2: (256, 16, 16) -> (256, 32, 32)
-    launch_upsample_forward(d_relu4_out, d_up2_out, 256, 16, 16);
+    // scale_factor=2
+    launch_upsample_forward(d_relu4_out, d_up2_out, 256, 16, 16, 2);
     
-    // Conv5: (256, 32, 32) -> (3, 32, 32)
+    // Conv5: (256, 32, 32) -> (3, 32, 32) [No activation]
+    // kernel_size=3, stride=1, padding=1
     launch_conv2d_forward(d_up2_out, d_conv5_weight, d_conv5_bias, d_conv5_out,
-                         256, 32, 32, 3, 32, 32, 3, 1);
+                         256, 32, 32, 3, 32, 32, 3, 1, 1);
 }
 
 void AutoencoderGPU::backward() {
     CUDA_CHECK(cudaMemset(d_grad_relu1, 0, 256 * 32 * 32 * sizeof(float)));
     CUDA_CHECK(cudaMemset(d_grad_relu2, 0, 128 * 16 * 16 * sizeof(float)));
     
-    // Conv5 backward
+    // Conv5 backward - kernel_size=3, stride=1, padding=1
     launch_conv2d_weight_grad(d_grad_conv5, d_up2_out, d_conv5_weight_grad,
-                             256, 32, 32, 3, 32, 32, 3, 1);
+                             256, 32, 32, 3, 32, 32, 3, 1, 1);
     
     launch_conv2d_bias_grad(d_grad_conv5, d_conv5_bias_grad, 3, 32, 32);
     
     launch_conv2d_input_grad(d_grad_conv5, d_conv5_weight, d_grad_up2,
-                            256, 32, 32, 3, 32, 32, 3, 1);
+                            256, 32, 32, 3, 32, 32, 3, 1, 1);
     
-    // Upsample2 backward
-    launch_upsample_backward(d_grad_up2, d_grad_relu4, 256, 16, 16);
+    // Upsample2 backward - scale_factor=2
+    launch_upsample_backward(d_grad_up2, d_grad_relu4, 256, 16, 16, 2);
     
     // ReLU4 backward
     launch_relu_backward(d_grad_relu4, d_conv4_out, d_grad_conv4, 256*16*16);
     
-    // Conv4 backward
+    // Conv4 backward - kernel_size=3, stride=1, padding=1
     launch_conv2d_weight_grad(d_grad_conv4, d_up1_out, d_conv4_weight_grad,
-                             128, 16, 16, 256, 16, 16, 3, 1);
+                             128, 16, 16, 256, 16, 16, 3, 1, 1);
     
     launch_conv2d_bias_grad(d_grad_conv4, d_conv4_bias_grad, 256, 16, 16);
     
     launch_conv2d_input_grad(d_grad_conv4, d_conv4_weight, d_grad_up1,
-                            128, 16, 16, 256, 16, 16, 3, 1);
+                            128, 16, 16, 256, 16, 16, 3, 1, 1);
     
-    // Upsample1 backward
-    launch_upsample_backward(d_grad_up1, d_grad_relu3, 128, 8, 8);
+    // Upsample1 backward - scale_factor=2
+    launch_upsample_backward(d_grad_up1, d_grad_relu3, 128, 8, 8, 2);
     
     // ReLU3 backward
     launch_relu_backward(d_grad_relu3, d_conv3_out, d_grad_conv3, 128*8*8);
     
-    // Conv3 backward
+    // Conv3 backward - kernel_size=3, stride=1, padding=1
     launch_conv2d_weight_grad(d_grad_conv3, d_pool2_out, d_conv3_weight_grad,
-                             128, 8, 8, 128, 8, 8, 3, 1);
+                             128, 8, 8, 128, 8, 8, 3, 1, 1);
     
     launch_conv2d_bias_grad(d_grad_conv3, d_conv3_bias_grad, 128, 8, 8);
     
     launch_conv2d_input_grad(d_grad_conv3, d_conv3_weight, d_grad_pool2,
-                            128, 8, 8, 128, 8, 8, 3, 1);
+                            128, 8, 8, 128, 8, 8, 3, 1, 1);
     
-    // MaxPool2 backward
-    launch_maxpool_backward(d_grad_pool2, d_relu2_out, d_grad_relu2, 128, 16, 16);
+    // MaxPool2 backward - pool_size=2, stride=2
+    launch_maxpool_backward(d_grad_pool2, d_relu2_out, d_grad_relu2, 128, 16, 16, 2, 2);
     
     // ReLU2 backward
     launch_relu_backward(d_grad_relu2, d_conv2_out, d_grad_conv2, 128*16*16);
     
-    // Conv2 backward
+    // Conv2 backward - kernel_size=3, stride=1, padding=1
     launch_conv2d_weight_grad(d_grad_conv2, d_pool1_out, d_conv2_weight_grad,
-                             256, 16, 16, 128, 16, 16, 3, 1);
+                             256, 16, 16, 128, 16, 16, 3, 1, 1);
     
     launch_conv2d_bias_grad(d_grad_conv2, d_conv2_bias_grad, 128, 16, 16);
     
     launch_conv2d_input_grad(d_grad_conv2, d_conv2_weight, d_grad_pool1,
-                            256, 16, 16, 128, 16, 16, 3, 1);
+                            256, 16, 16, 128, 16, 16, 3, 1, 1);
     
-    // MaxPool1 backward
-    launch_maxpool_backward(d_grad_pool1, d_relu1_out, d_grad_relu1, 256, 32, 32);
+    // MaxPool1 backward - pool_size=2, stride=2
+    launch_maxpool_backward(d_grad_pool1, d_relu1_out, d_grad_relu1, 256, 32, 32, 2, 2);
     
     // ReLU1 backward
     launch_relu_backward(d_grad_relu1, d_conv1_out, d_grad_conv1, 256*32*32);
     
-    // Conv1 backward
+    // Conv1 backward - kernel_size=3, stride=1, padding=1
     launch_conv2d_weight_grad(d_grad_conv1, d_input, d_conv1_weight_grad,
-                             3, 32, 32, 256, 32, 32, 3, 1);
+                             3, 32, 32, 256, 32, 32, 3, 1, 1);
     
     launch_conv2d_bias_grad(d_grad_conv1, d_conv1_bias_grad, 256, 32, 32);
 }
@@ -508,24 +517,28 @@ void AutoencoderGPU::extract_features(const float* input_chw, float* output_feat
     // Run encoder only (stop at bottleneck)
     
     // Conv1: (3, 32, 32) -> (256, 32, 32)
+    // kernel_size=3, stride=1, padding=1
     launch_conv2d_forward(d_input, d_conv1_weight, d_conv1_bias, d_conv1_out,
-                         3, 32, 32, 256, 32, 32, 3, 1);
+                         3, 32, 32, 256, 32, 32, 3, 1, 1);
     
     // ReLU1
     launch_relu_forward(d_conv1_out, d_relu1_out, 256*32*32);
     
     // MaxPool1: (256, 32, 32) -> (256, 16, 16)
-    launch_maxpool_forward(d_relu1_out, d_pool1_out, 256, 32, 32);
+    // pool_size=2, stride=2
+    launch_maxpool_forward(d_relu1_out, d_pool1_out, 256, 32, 32, 2, 2);
     
     // Conv2: (256, 16, 16) -> (128, 16, 16)
+    // kernel_size=3, stride=1, padding=1
     launch_conv2d_forward(d_pool1_out, d_conv2_weight, d_conv2_bias, d_conv2_out,
-                         256, 16, 16, 128, 16, 16, 3, 1);
+                         256, 16, 16, 128, 16, 16, 3, 1, 1);
     
     // ReLU2
     launch_relu_forward(d_conv2_out, d_relu2_out, 128*16*16);
     
     // MaxPool2: (128, 16, 16) -> (128, 8, 8) - BOTTLENECK/FEATURES
-    launch_maxpool_forward(d_relu2_out, d_pool2_out, 128, 16, 16);
+    // pool_size=2, stride=2
+    launch_maxpool_forward(d_relu2_out, d_pool2_out, 128, 16, 16, 2, 2);
     
     CUDA_CHECK(cudaDeviceSynchronize());
     

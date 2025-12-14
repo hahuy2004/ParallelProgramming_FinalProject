@@ -13,7 +13,7 @@ void launch_conv2d_forward(
     float* output,
     int C_in, int H_in, int W_in,
     int C_out, int H_out, int W_out,
-    int K, int pad);
+    int kernel_size, int stride, int padding);
 
 // ReLU forward kernel
 void launch_relu_forward(
@@ -25,13 +25,15 @@ void launch_relu_forward(
 void launch_maxpool_forward(
     const float* input,
     float* output,
-    int C, int H, int W);
+    int C, int H, int W,
+    int pool_size, int stride);
 
-// Upsample2x forward kernel
+// Upsample forward kernel
 void launch_upsample_forward(
     const float* input,
     float* output,
-    int C, int H, int W);
+    int C, int H, int W,
+    int scale_factor);
 
 // ============================================================================
 // BACKWARD PASS KERNELS
@@ -49,13 +51,15 @@ void launch_maxpool_backward(
     const float* grad_output,
     const float* input,
     float* grad_input,
-    int C, int H, int W);
+    int C, int H, int W,
+    int pool_size, int stride);
 
 // Upsample backward kernel
 void launch_upsample_backward(
     const float* grad_output,
     float* grad_input,
-    int C, int H, int W);
+    int C, int H, int W,
+    int scale_factor);
 
 // Conv2D weight gradient kernel
 void launch_conv2d_weight_grad(
@@ -64,7 +68,7 @@ void launch_conv2d_weight_grad(
     float* weight_grad,
     int C_in, int H_in, int W_in,
     int C_out, int H_out, int W_out,
-    int K, int pad);
+    int kernel_size, int stride, int padding);
 
 // Conv2D bias gradient kernel
 void launch_conv2d_bias_grad(
@@ -79,7 +83,7 @@ void launch_conv2d_input_grad(
     float* grad_input,
     int C_in, int H_in, int W_in,
     int C_out, int H_out, int W_out,
-    int K, int pad);
+    int kernel_size, int stride, int padding);
 
 // ============================================================================
 // LOSS AND OPTIMIZATION KERNELS
