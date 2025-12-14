@@ -1,5 +1,10 @@
 # Build artifacts
-build/
+build/*.o
+build/phase1
+build/phase2
+build/phase3
+build/phase4
+build/phase4_*
 *.o
 *.so
 *.a
@@ -76,3 +81,7 @@ docs/_build/
 third_lib/libsvm/.git/
 third_lib/libsvm/.github/
 third_lib/libsvm
+third_lib/cuml
+third_lib/thundersvm
+
+features/gpu_optimized_1/
