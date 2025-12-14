@@ -88,4 +88,4 @@ third_lib/cuml
 third_lib/thundersvm
 
 features/gpu_*
-features/cpu_*
+features/cpu

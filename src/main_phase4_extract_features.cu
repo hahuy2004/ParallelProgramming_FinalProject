@@ -70,10 +70,7 @@ void extract_and_save_features(const std::string& mode,
         
     } else if (mode == "gpu_naive") {
         AutoencoderGPU autoencoder;
-        if (!autoencoder.load_weights(weights_path)) {
-            std::cerr << "Failed to load weights from: " << weights_path << std::endl;
-            return;
-        }
+        autoencoder.load_weights(weights_path);
         
         // GPU naive uses per-image API, need to loop through images
         std::cout << "Extracting training features..." << std::endl;
@@ -105,21 +102,61 @@ void extract_and_save_features(const std::string& mode,
         AutoencoderGPUOptimized1 autoencoder;
         autoencoder.load_weights(weights_path);
         
+        // GPU optimized versions use per-image API
         std::cout << "Extracting training features..." << std::endl;
-        autoencoder.extract_features(train_images, num_train_samples, train_features);
+        train_features.resize(num_train_samples * FEATURE_DIM);
+        const int IMAGE_SIZE = 3 * 32 * 32;
+        for (int i = 0; i < num_train_samples; i++) {
+            const float* img_ptr = train_images.data() + i * IMAGE_SIZE;
+            float* feat_ptr = train_features.data() + i * FEATURE_DIM;
+            autoencoder.extract_features(img_ptr, feat_ptr);
+            if ((i + 1) % 1000 == 0) {
+                std::cout << "  Processed " << (i + 1) << "/" << num_train_samples << " images\r" << std::flush;
+            }
+        }
+        std::cout << "  Processed " << num_train_samples << "/" << num_train_samples << " images" << std::endl;
         
         std::cout << "Extracting test features..." << std::endl;
-        autoencoder.extract_features(test_images, num_test_samples, test_features);
+        test_features.resize(num_test_samples * FEATURE_DIM);
+        for (int i = 0; i < num_test_samples; i++) {
+            const float* img_ptr = test_images.data() + i * IMAGE_SIZE;
+            float* feat_ptr = test_features.data() + i * FEATURE_DIM;
+            autoencoder.extract_features(img_ptr, feat_ptr);
+            if ((i + 1) % 1000 == 0) {
+                std::cout << "  Processed " << (i + 1) << "/" << num_test_samples << " images\r" << std::flush;
+            }
+        }
+        std::cout << "  Processed " << num_test_samples << "/" << num_test_samples << " images" << std::endl;
         
     } else if (mode == "gpu_optimized_2") {
         AutoencoderGPUOptimized2 autoencoder;
         autoencoder.load_weights(weights_path);
         
+        // GPU optimized versions use per-image API
         std::cout << "Extracting training features..." << std::endl;
-        autoencoder.extract_features(train_images, num_train_samples, train_features);
+        train_features.resize(num_train_samples * FEATURE_DIM);
+        const int IMAGE_SIZE = 3 * 32 * 32;
+        for (int i = 0; i < num_train_samples; i++) {
+            const float* img_ptr = train_images.data() + i * IMAGE_SIZE;
+            float* feat_ptr = train_features.data() + i * FEATURE_DIM;
+            autoencoder.extract_features(img_ptr, feat_ptr);
+            if ((i + 1) % 1000 == 0) {
+                std::cout << "  Processed " << (i + 1) << "/" << num_train_samples << " images\r" << std::flush;
+            }
+        }
+        std::cout << "  Processed " << num_train_samples << "/" << num_train_samples << " images" << std::endl;
         
         std::cout << "Extracting test features..." << std::endl;
-        autoencoder.extract_features(test_images, num_test_samples, test_features);
+        test_features.resize(num_test_samples * FEATURE_DIM);
+        for (int i = 0; i < num_test_samples; i++) {
+            const float* img_ptr = test_images.data() + i * IMAGE_SIZE;
+            float* feat_ptr = test_features.data() + i * FEATURE_DIM;
+            autoencoder.extract_features(img_ptr, feat_ptr);
+            if ((i + 1) % 1000 == 0) {
+                std::cout << "  Processed " << (i + 1) << "/" << num_test_samples << " images\r" << std::flush;
+            }
+        }
+        std::cout << "  Processed " << num_test_samples << "/" << num_test_samples << " images" << std::endl;
     }
     
     auto extract_end = std::chrono::high_resolution_clock::now();
@@ -196,13 +233,13 @@ int main(int argc, char** argv) {
         num_test_samples = 1000;  // CPU: only extract 1000 test images
         std::cout << "\nNOTE: CPU mode - using " << num_train_samples 
                   << " training samples and " << num_test_samples << " test samples" << std::endl;
-        weights_path = "../autoencoder_cpu.weights";
+        weights_path = "weights/autoencoder_cpu.bin";
     } else if (mode == "gpu_naive") {
-        weights_path = "../autoencoder_gpu_naive.weights";
+        weights_path = "weights/autoencoder_gpu_naive.bin";
     } else if (mode == "gpu_optimized_1") {
-        weights_path = "../autoencoder_gpu_optimized_1.weights";
+        weights_path = "weights/autoencoder_gpu_optimized_1.bin";
     } else if (mode == "gpu_optimized_2") {
-        weights_path = "../autoencoder_gpu_optimized_2.weights";
+        weights_path = "weights/autoencoder_gpu_optimized_2.bin";
     }
     
     // Check if weights file exists

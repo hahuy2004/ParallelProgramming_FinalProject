@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
     
     // GPU OPTIMIZED PHASE: Full training với 50000 ảnh, 20 epochs
     int batch_size = 64;  
-    int epochs = 5;  // Change to 20 for full training
+    int epochs = 5;
     float learning_rate = 0.001f;
     int num_train_images = 50000; // Change to 50000 for full training
     
@@ -38,8 +38,8 @@ int main(int argc, char** argv) {
     std::cout << "\n=== Training GPU Autoencoder (optimized) ===" << std::endl;
     std::cout << "Full training with " << loader.get_train_size() 
               << " images, " << epochs << " epochs" << std::endl;
-    std::cout << "Expected time: ~" << (loader.get_train_size() * epochs / 1024 * 77.5 / 60) 
-              << " minutes (estimated from test runs)" << std::endl;
+    // std::cout << "Expected time: ~" << (loader.get_train_size() * epochs / 1024 * 77.5 / 60) 
+    //           << " minutes (estimated from test runs)" << std::endl;
     
     //---------------------Kernel-Level Optimization---------------------
     AutoencoderGPUOptimized2 autoencoder_ver_2;

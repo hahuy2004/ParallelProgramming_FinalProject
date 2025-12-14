@@ -38,8 +38,8 @@ int main(int argc, char** argv) {
     std::cout << "\n=== Training GPU Autoencoder (optimized) ===" << std::endl;
     std::cout << "Full training with " << loader.get_train_size() 
               << " images, " << epochs << " epochs" << std::endl;
-    std::cout << "Expected time: ~" << (loader.get_train_size() * epochs / 1024 * 77.5 / 60) 
-              << " minutes (estimated from test runs)" << std::endl;
+    // std::cout << "Expected time: ~" << (loader.get_train_size() * epochs / 1024 * 77.5 / 60) 
+    //           << " minutes (estimated from test runs)" << std::endl;
     //---------------------Memory Optimization---------------------
     AutoencoderGPUOptimized1 autoencoder_ver_1;
     
