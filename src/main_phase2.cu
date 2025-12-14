@@ -56,36 +56,15 @@ int main(int argc, char** argv) {
     
     auto train_end = std::chrono::high_resolution_clock::now();
     float train_time = std::chrono::duration<float>(train_end - train_start).count();
-    //=====================================================//
-
-
-
-    //==================== Save weights ====================//
-    std::cout << "========= Saving Model ==========" << std::endl;
+    
+    // Save weights
+    std::cout << "\n=== Saving Model ===" << std::endl;
     std::string weights_path = "weights/autoencoder_gpu_naive.weights";
     autoencoder.save_weights(weights_path);
-    //=====================================================//
-
-
-
-    //================ TESTING EXTRACTION TIME  ===================//
-    std::cout << "\n===== Feature Extraction on Train and Test Images=====" << std::endl;
-    std::cout << "Extracting 8192-dimensional features from encoder..." << std::endl;
-    std::vector<float> train_features;
-    std::vector<float> test_features;
-
-    // TRAINING FEATURES
-    std::cout << "  - Extracting training features..." << std::endl;
-    autoencoder.extract_features(train_images, loader.get_train_size(), train_features);
-
-    // TEST FEATURES
-    std::cout << "  - Extracting test features..." << std::endl;
-    autoencoder.extract_features(loader.get_test_images(), loader.get_test_size(), test_features);
-    //=====================================================//
-
     
-    std::cout << "\n================ PHASE 2 COMPLETED ================\n\n" << std::endl;
-
+    std::cout << "\n=== Phase 2 Completed ===" << std::endl;
+    std::cout << "Total training time: " << train_time << " seconds" << std::endl;
+    std::cout << "Weights saved to: " << weights_path << std::endl;
     
     return 0;
 }

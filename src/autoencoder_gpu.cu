@@ -75,8 +75,9 @@ AutoencoderGPU::~AutoencoderGPU() {
 }
 
 void AutoencoderGPU::initialize_weights() {
-    std::random_device rd;
-    std::mt19937 gen(rd());
+    // std::random_device rd;
+    // std::mt19937 gen(rd());
+    std::mt19937 gen(42);      // Fixed seed for reproducibility
     
     auto init_and_upload = [&](float** d_ptr, int size, int fan_in) {
         std::vector<float> h_weights(size);

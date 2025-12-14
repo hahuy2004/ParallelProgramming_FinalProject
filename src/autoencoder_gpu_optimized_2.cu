@@ -75,8 +75,9 @@ AutoencoderGPUOptimized2::~AutoencoderGPUOptimized2() {
 }
 
 void AutoencoderGPUOptimized2::initialize_weights() {
-    std::random_device rd;
-    std::mt19937 gen(rd());
+    // std::random_device rd;
+    // std::mt19937 gen(rd());
+    std::mt19937 gen(42);      // Fixed seed for reproducibility
     
     // He initilization
     auto init_and_upload = [&](float** d_ptr, int size, int fan_in) {
