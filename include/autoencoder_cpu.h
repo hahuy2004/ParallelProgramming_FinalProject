@@ -45,51 +45,51 @@ private:
     static constexpr int LATENT_DIM = LATENT_H * LATENT_W * LATENT_C;  // 8192
     
     // Weights and biases
-    std::vector<float> conv1_weights_;  // [256, 3, 3, 3]
-    std::vector<float> conv1_bias_;     // [256]
-    std::vector<float> conv2_weights_;  // [128, 256, 3, 3]
-    std::vector<float> conv2_bias_;     // [128]
-    std::vector<float> conv3_weights_;  // [128, 128, 3, 3]
-    std::vector<float> conv3_bias_;     // [128]
-    std::vector<float> conv4_weights_;  // [256, 128, 3, 3]
-    std::vector<float> conv4_bias_;     // [256]
-    std::vector<float> conv5_weights_;  // [3, 256, 3, 3]
-    std::vector<float> conv5_bias_;     // [3]
+    std::vector<float> conv1_weight;  // [256, 3, 3, 3]
+    std::vector<float> conv1_bias;     // [256]
+    std::vector<float> conv2_weight;  // [128, 256, 3, 3]
+    std::vector<float> conv2_bias;     // [128]
+    std::vector<float> conv3_weight;  // [128, 128, 3, 3]
+    std::vector<float> conv3_bias;     // [128]
+    std::vector<float> conv4_weight;  // [256, 128, 3, 3]
+    std::vector<float> conv4_bias;     // [256]
+    std::vector<float> conv5_weight;  // [3, 256, 3, 3]
+    std::vector<float> conv5_bias;     // [3]
     
     // Activation buffers (for one batch)
-    std::vector<float> conv1_out_;
-    std::vector<float> pool1_out_;
-    std::vector<float> conv2_out_;
-    std::vector<float> pool2_out_;  // Latent representation
-    std::vector<float> conv3_out_;
-    std::vector<float> up1_out_;
-    std::vector<float> conv4_out_;
-    std::vector<float> up2_out_;
-    std::vector<float> conv5_out_;  // Reconstruction
+    std::vector<float> conv1_out;
+    std::vector<float> pool1_out;
+    std::vector<float> conv2_out;
+    std::vector<float> pool2_out;  // Latent representation
+    std::vector<float> conv3_out;
+    std::vector<float> up1_out;
+    std::vector<float> conv4_out;
+    std::vector<float> up2_out;
+    std::vector<float> conv5_out;  // Reconstruction
     
     // Gradient buffers
-    std::vector<float> grad_conv5_out_;
-    std::vector<float> grad_up2_out_;
-    std::vector<float> grad_conv4_out_;
-    std::vector<float> grad_up1_out_;
-    std::vector<float> grad_conv3_out_;
-    std::vector<float> grad_pool2_out_;
-    std::vector<float> grad_conv2_out_;
-    std::vector<float> grad_pool1_out_;
-    std::vector<float> grad_conv1_out_;
+    std::vector<float> grad_conv5;
+    std::vector<float> grad_up2;
+    std::vector<float> grad_conv4;
+    std::vector<float> grad_up1;
+    std::vector<float> grad_conv3;
+    std::vector<float> grad_pool2;
+    std::vector<float> grad_conv2;
+    std::vector<float> grad_pool1;
+    std::vector<float> grad_conv1;
     
-    std::vector<float> grad_conv1_weights_;
-    std::vector<float> grad_conv1_bias_;
-    std::vector<float> grad_conv2_weights_;
-    std::vector<float> grad_conv2_bias_;
-    std::vector<float> grad_conv3_weights_;
-    std::vector<float> grad_conv3_bias_;
-    std::vector<float> grad_conv4_weights_;
-    std::vector<float> grad_conv4_bias_;
-    std::vector<float> grad_conv5_weights_;
-    std::vector<float> grad_conv5_bias_;
+    std::vector<float> conv1_weight_grad;
+    std::vector<float> conv1_bias_grad;
+    std::vector<float> conv2_weight_grad;
+    std::vector<float> conv2_bias_grad;
+    std::vector<float> conv3_weight_grad;
+    std::vector<float> conv3_bias_grad;
+    std::vector<float> conv4_weight_grad;
+    std::vector<float> conv4_bias_grad;
+    std::vector<float> conv5_weight_grad;
+    std::vector<float> conv5_bias_grad;
     
-    int current_batch_size_;
+    int current_batch_size;
     
     // Layer operations
     void initialize_weights();

@@ -7,7 +7,7 @@
 #include <chrono>
 #include <cstring>
 
-AutoencoderCPU::AutoencoderCPU() : current_batch_size_(0) {
+AutoencoderCPU::AutoencoderCPU() : current_batch_size(0) {
     initialize_weights();
 }
 
@@ -29,58 +29,58 @@ void AutoencoderCPU::initialize_weights() {
     };
     
     // Initialize all conv layers
-    init_conv(conv1_weights_, INPUT_C, CONV1_FILTERS, 3);
-    conv1_bias_.resize(CONV1_FILTERS, 0.0f);
+    init_conv(conv1_weight, INPUT_C, CONV1_FILTERS, 3);
+    conv1_bias.resize(CONV1_FILTERS, 0.0f);
     
-    init_conv(conv2_weights_, CONV1_FILTERS, CONV2_FILTERS, 3);
-    conv2_bias_.resize(CONV2_FILTERS, 0.0f);
+    init_conv(conv2_weight, CONV1_FILTERS, CONV2_FILTERS, 3);
+    conv2_bias.resize(CONV2_FILTERS, 0.0f);
     
-    init_conv(conv3_weights_, LATENT_C, LATENT_C, 3);
-    conv3_bias_.resize(LATENT_C, 0.0f);
+    init_conv(conv3_weight, LATENT_C, LATENT_C, 3);
+    conv3_bias.resize(LATENT_C, 0.0f);
     
-    init_conv(conv4_weights_, LATENT_C, CONV1_FILTERS, 3);
-    conv4_bias_.resize(CONV1_FILTERS, 0.0f);
+    init_conv(conv4_weight, LATENT_C, CONV1_FILTERS, 3);
+    conv4_bias.resize(CONV1_FILTERS, 0.0f);
     
-    init_conv(conv5_weights_, CONV1_FILTERS, INPUT_C, 3);
-    conv5_bias_.resize(INPUT_C, 0.0f);
+    init_conv(conv5_weight, CONV1_FILTERS, INPUT_C, 3);
+    conv5_bias.resize(INPUT_C, 0.0f);
 }
 
 void AutoencoderCPU::allocate_buffers(int batch_size) {
-    if (batch_size == current_batch_size_) return;
-    current_batch_size_ = batch_size;
+    if (batch_size == current_batch_size) return;
+    current_batch_size = batch_size;
     
     // Allocate activation buffers
-    conv1_out_.resize(batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-    pool1_out_.resize(batch_size * 16 * 16 * CONV1_FILTERS);
-    conv2_out_.resize(batch_size * 16 * 16 * CONV2_FILTERS);
-    pool2_out_.resize(batch_size * LATENT_H * LATENT_W * LATENT_C);
-    conv3_out_.resize(batch_size * LATENT_H * LATENT_W * LATENT_C);
-    up1_out_.resize(batch_size * 16 * 16 * LATENT_C);
-    conv4_out_.resize(batch_size * 16 * 16 * CONV1_FILTERS);
-    up2_out_.resize(batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-    conv5_out_.resize(batch_size * INPUT_H * INPUT_W * INPUT_C);
+    conv1_out.resize(batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
+    pool1_out.resize(batch_size * 16 * 16 * CONV1_FILTERS);
+    conv2_out.resize(batch_size * 16 * 16 * CONV2_FILTERS);
+    pool2_out.resize(batch_size * LATENT_H * LATENT_W * LATENT_C);
+    conv3_out.resize(batch_size * LATENT_H * LATENT_W * LATENT_C);
+    up1_out.resize(batch_size * 16 * 16 * LATENT_C);
+    conv4_out.resize(batch_size * 16 * 16 * CONV1_FILTERS);
+    up2_out.resize(batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
+    conv5_out.resize(batch_size * INPUT_H * INPUT_W * INPUT_C);
     
     // Allocate gradient buffers
-    grad_conv5_out_.resize(batch_size * INPUT_H * INPUT_W * INPUT_C);
-    grad_up2_out_.resize(batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-    grad_conv4_out_.resize(batch_size * 16 * 16 * CONV1_FILTERS);
-    grad_up1_out_.resize(batch_size * 16 * 16 * LATENT_C);
-    grad_conv3_out_.resize(batch_size * LATENT_H * LATENT_W * LATENT_C);
-    grad_pool2_out_.resize(batch_size * LATENT_H * LATENT_W * LATENT_C);
-    grad_conv2_out_.resize(batch_size * 16 * 16 * CONV2_FILTERS);
-    grad_pool1_out_.resize(batch_size * 16 * 16 * CONV1_FILTERS);
-    grad_conv1_out_.resize(batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
+    grad_conv5.resize(batch_size * INPUT_H * INPUT_W * INPUT_C);
+    grad_up2.resize(batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
+    grad_conv4.resize(batch_size * 16 * 16 * CONV1_FILTERS);
+    grad_up1.resize(batch_size * 16 * 16 * LATENT_C);
+    grad_conv3.resize(batch_size * LATENT_H * LATENT_W * LATENT_C);
+    grad_pool2.resize(batch_size * LATENT_H * LATENT_W * LATENT_C);
+    grad_conv2.resize(batch_size * 16 * 16 * CONV2_FILTERS);
+    grad_pool1.resize(batch_size * 16 * 16 * CONV1_FILTERS);
+    grad_conv1.resize(batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
     
-    grad_conv1_weights_.resize(conv1_weights_.size(), 0.0f);
-    grad_conv1_bias_.resize(conv1_bias_.size(), 0.0f);
-    grad_conv2_weights_.resize(conv2_weights_.size(), 0.0f);
-    grad_conv2_bias_.resize(conv2_bias_.size(), 0.0f);
-    grad_conv3_weights_.resize(conv3_weights_.size(), 0.0f);
-    grad_conv3_bias_.resize(conv3_bias_.size(), 0.0f);
-    grad_conv4_weights_.resize(conv4_weights_.size(), 0.0f);
-    grad_conv4_bias_.resize(conv4_bias_.size(), 0.0f);
-    grad_conv5_weights_.resize(conv5_weights_.size(), 0.0f);
-    grad_conv5_bias_.resize(conv5_bias_.size(), 0.0f);
+    conv1_weight_grad.resize(conv1_weight.size(), 0.0f);
+    conv1_bias_grad.resize(conv1_bias.size(), 0.0f);
+    conv2_weight_grad.resize(conv2_weight.size(), 0.0f);
+    conv2_bias_grad.resize(conv2_bias.size(), 0.0f);
+    conv3_weight_grad.resize(conv3_weight.size(), 0.0f);
+    conv3_bias_grad.resize(conv3_bias.size(), 0.0f);
+    conv4_weight_grad.resize(conv4_weight.size(), 0.0f);
+    conv4_bias_grad.resize(conv4_bias.size(), 0.0f);
+    conv5_weight_grad.resize(conv5_weight.size(), 0.0f);
+    conv5_bias_grad.resize(conv5_bias.size(), 0.0f);
 }
 
 void AutoencoderCPU::conv2d_forward(const float* input, float* output,
@@ -301,175 +301,175 @@ void AutoencoderCPU::forward(const float* input, int batch_size) {
     
     // ENCODER FORWARD PASS
     // Conv1 + ReLU: (32, 32, 3) -> (32, 32, 256)
-    conv2d_forward(input, conv1_out_.data(), conv1_weights_.data(), conv1_bias_.data(),
+    conv2d_forward(input, conv1_out.data(), conv1_weight.data(), conv1_bias.data(),
                    batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
-    relu_forward(conv1_out_.data(), conv1_out_.data(), conv1_out_.size());
+    relu_forward(conv1_out.data(), conv1_out.data(), conv1_out.size());
     
     // MaxPool: (32, 32, 256) -> (16, 16, 256)
-    maxpool2d_forward(conv1_out_.data(), pool1_out_.data(),
+    maxpool2d_forward(conv1_out.data(), pool1_out.data(),
                       batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
     
     // Conv2 + ReLU: (16, 16, 256) -> (16, 16, 128)
-    conv2d_forward(pool1_out_.data(), conv2_out_.data(), conv2_weights_.data(), conv2_bias_.data(),
+    conv2d_forward(pool1_out.data(), conv2_out.data(), conv2_weight.data(), conv2_bias.data(),
                    batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
-    relu_forward(conv2_out_.data(), conv2_out_.data(), conv2_out_.size());
+    relu_forward(conv2_out.data(), conv2_out.data(), conv2_out.size());
     
     // MaxPool: (16, 16, 128) -> (8, 8, 128) - Latent representation
-    maxpool2d_forward(conv2_out_.data(), pool2_out_.data(),
+    maxpool2d_forward(conv2_out.data(), pool2_out.data(),
                       batch_size, 16, 16, CONV2_FILTERS, 2, 2);
     
     // DECODER FORWARD PASS
     // Conv3 + ReLU: (8, 8, 128) -> (8, 8, 128)
-    conv2d_forward(pool2_out_.data(), conv3_out_.data(), conv3_weights_.data(), conv3_bias_.data(),
+    conv2d_forward(pool2_out.data(), conv3_out.data(), conv3_weight.data(), conv3_bias.data(),
                    batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
-    relu_forward(conv3_out_.data(), conv3_out_.data(), conv3_out_.size());
+    relu_forward(conv3_out.data(), conv3_out.data(), conv3_out.size());
     
     // Upsample: (8, 8, 128) -> (16, 16, 128)
-    upsample2d_forward(conv3_out_.data(), up1_out_.data(),
+    upsample2d_forward(conv3_out.data(), up1_out.data(),
                        batch_size, LATENT_H, LATENT_W, LATENT_C, 2);
     
     // Conv4 + ReLU: (16, 16, 128) -> (16, 16, 256)
-    conv2d_forward(up1_out_.data(), conv4_out_.data(), conv4_weights_.data(), conv4_bias_.data(),
+    conv2d_forward(up1_out.data(), conv4_out.data(), conv4_weight.data(), conv4_bias.data(),
                    batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1);
-    relu_forward(conv4_out_.data(), conv4_out_.data(), conv4_out_.size());
+    relu_forward(conv4_out.data(), conv4_out.data(), conv4_out.size());
     
     // Upsample: (16, 16, 256) -> (32, 32, 256)
-    upsample2d_forward(conv4_out_.data(), up2_out_.data(),
+    upsample2d_forward(conv4_out.data(), up2_out.data(),
                        batch_size, 16, 16, CONV1_FILTERS, 2);
     
     // Conv5 (no activation): (32, 32, 256) -> (32, 32, 3)
-    conv2d_forward(up2_out_.data(), conv5_out_.data(), conv5_weights_.data(), conv5_bias_.data(),
+    conv2d_forward(up2_out.data(), conv5_out.data(), conv5_weight.data(), conv5_bias.data(),
                    batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
 }
 
 void AutoencoderCPU::backward(const float* input, int batch_size) {
     // Compute loss gradient: d_loss/d_output = 2 * (output - target) / N
-    int total_elements = grad_conv5_out_.size();
-    for (size_t i = 0; i < grad_conv5_out_.size(); ++i) {
-        grad_conv5_out_[i] = 2.0f * (conv5_out_[i] - input[i]) / total_elements;
+    int total_elements = grad_conv5.size();
+    for (size_t i = 0; i < grad_conv5.size(); ++i) {
+        grad_conv5[i] = 2.0f * (conv5_out[i] - input[i]) / total_elements;
     }
     
     // Clear all weight gradients
-    std::fill(grad_conv1_weights_.begin(), grad_conv1_weights_.end(), 0.0f);
-    std::fill(grad_conv1_bias_.begin(), grad_conv1_bias_.end(), 0.0f);
-    std::fill(grad_conv2_weights_.begin(), grad_conv2_weights_.end(), 0.0f);
-    std::fill(grad_conv2_bias_.begin(), grad_conv2_bias_.end(), 0.0f);
-    std::fill(grad_conv3_weights_.begin(), grad_conv3_weights_.end(), 0.0f);
-    std::fill(grad_conv3_bias_.begin(), grad_conv3_bias_.end(), 0.0f);
-    std::fill(grad_conv4_weights_.begin(), grad_conv4_weights_.end(), 0.0f);
-    std::fill(grad_conv4_bias_.begin(), grad_conv4_bias_.end(), 0.0f);
-    std::fill(grad_conv5_weights_.begin(), grad_conv5_weights_.end(), 0.0f);
-    std::fill(grad_conv5_bias_.begin(), grad_conv5_bias_.end(), 0.0f);
+    std::fill(conv1_weight_grad.begin(), conv1_weight_grad.end(), 0.0f);
+    std::fill(conv1_bias_grad.begin(), conv1_bias_grad.end(), 0.0f);
+    std::fill(conv2_weight_grad.begin(), conv2_weight_grad.end(), 0.0f);
+    std::fill(conv2_bias_grad.begin(), conv2_bias_grad.end(), 0.0f);
+    std::fill(conv3_weight_grad.begin(), conv3_weight_grad.end(), 0.0f);
+    std::fill(conv3_bias_grad.begin(), conv3_bias_grad.end(), 0.0f);
+    std::fill(conv4_weight_grad.begin(), conv4_weight_grad.end(), 0.0f);
+    std::fill(conv4_bias_grad.begin(), conv4_bias_grad.end(), 0.0f);
+    std::fill(conv5_weight_grad.begin(), conv5_weight_grad.end(), 0.0f);
+    std::fill(conv5_bias_grad.begin(), conv5_bias_grad.end(), 0.0f);
     
     // DECODER BACKWARD PASS
     // Backward through Conv5: (32, 32, 256) -> (32, 32, 3)
-    conv2d_backward(grad_conv5_out_.data(), grad_up2_out_.data(),
-                    grad_conv5_weights_.data(), grad_conv5_bias_.data(),
-                    up2_out_.data(), conv5_weights_.data(),
+    conv2d_backward(grad_conv5.data(), grad_up2.data(),
+                    conv5_weight_grad.data(), conv5_bias_grad.data(),
+                    up2_out.data(), conv5_weight.data(),
                     batch_size, INPUT_H, INPUT_W, CONV1_FILTERS,
                     INPUT_C, 3, 1, 1);
     
     // Backward through UpSample2: (16, 16, 256) -> (32, 32, 256)
-    upsample2d_backward(grad_up2_out_.data(), grad_conv4_out_.data(),
+    upsample2d_backward(grad_up2.data(), grad_conv4.data(),
                         batch_size, 16, 16, CONV1_FILTERS, 2);
     
     // Backward through ReLU for Conv4
-    relu_backward(grad_conv4_out_.data(), grad_conv4_out_.data(),
-                  conv4_out_.data(), grad_conv4_out_.size());
+    relu_backward(grad_conv4.data(), grad_conv4.data(),
+                  conv4_out.data(), grad_conv4.size());
     
     // Backward through Conv4: (16, 16, 128) -> (16, 16, 256)
-    conv2d_backward(grad_conv4_out_.data(), grad_up1_out_.data(),
-                    grad_conv4_weights_.data(), grad_conv4_bias_.data(),
-                    up1_out_.data(), conv4_weights_.data(),
+    conv2d_backward(grad_conv4.data(), grad_up1.data(),
+                    conv4_weight_grad.data(), conv4_bias_grad.data(),
+                    up1_out.data(), conv4_weight.data(),
                     batch_size, 16, 16, LATENT_C,
                     CONV1_FILTERS, 3, 1, 1);
     
     // Backward through UpSample1: (8, 8, 128) -> (16, 16, 128)
-    upsample2d_backward(grad_up1_out_.data(), grad_conv3_out_.data(),
+    upsample2d_backward(grad_up1.data(), grad_conv3.data(),
                         batch_size, LATENT_H, LATENT_W, LATENT_C, 2);
     
     // Backward through ReLU for Conv3
-    relu_backward(grad_conv3_out_.data(), grad_conv3_out_.data(),
-                  conv3_out_.data(), grad_conv3_out_.size());
+    relu_backward(grad_conv3.data(), grad_conv3.data(),
+                  conv3_out.data(), grad_conv3.size());
     
     // Backward through Conv3: (8, 8, 128) -> (8, 8, 128)
-    conv2d_backward(grad_conv3_out_.data(), grad_pool2_out_.data(),
-                    grad_conv3_weights_.data(), grad_conv3_bias_.data(),
-                    pool2_out_.data(), conv3_weights_.data(),
+    conv2d_backward(grad_conv3.data(), grad_pool2.data(),
+                    conv3_weight_grad.data(), conv3_bias_grad.data(),
+                    pool2_out.data(), conv3_weight.data(),
                     batch_size, LATENT_H, LATENT_W, LATENT_C,
                     LATENT_C, 3, 1, 1);
     
     // ENCODER BACKWARD PASS
     // Backward through MaxPool2: (16, 16, 128) -> (8, 8, 128)
-    maxpool2d_backward(grad_pool2_out_.data(), grad_conv2_out_.data(),
-                       conv2_out_.data(), pool2_out_.data(),
+    maxpool2d_backward(grad_pool2.data(), grad_conv2.data(),
+                       conv2_out.data(), pool2_out.data(),
                        batch_size, 16, 16, CONV2_FILTERS, 2, 2);
     
     // Backward through ReLU for Conv2
-    relu_backward(grad_conv2_out_.data(), grad_conv2_out_.data(),
-                  conv2_out_.data(), grad_conv2_out_.size());
+    relu_backward(grad_conv2.data(), grad_conv2.data(),
+                  conv2_out.data(), grad_conv2.size());
     
     // Backward through Conv2: (16, 16, 256) -> (16, 16, 128)
-    conv2d_backward(grad_conv2_out_.data(), grad_pool1_out_.data(),
-                    grad_conv2_weights_.data(), grad_conv2_bias_.data(),
-                    pool1_out_.data(), conv2_weights_.data(),
+    conv2d_backward(grad_conv2.data(), grad_pool1.data(),
+                    conv2_weight_grad.data(), conv2_bias_grad.data(),
+                    pool1_out.data(), conv2_weight.data(),
                     batch_size, 16, 16, CONV1_FILTERS,
                     CONV2_FILTERS, 3, 1, 1);
     
     // Backward through MaxPool1: (32, 32, 256) -> (16, 16, 256)
-    maxpool2d_backward(grad_pool1_out_.data(), grad_conv1_out_.data(),
-                       conv1_out_.data(), pool1_out_.data(),
+    maxpool2d_backward(grad_pool1.data(), grad_conv1.data(),
+                       conv1_out.data(), pool1_out.data(),
                        batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
     
     // Backward through ReLU for Conv1
-    relu_backward(grad_conv1_out_.data(), grad_conv1_out_.data(),
-                  conv1_out_.data(), grad_conv1_out_.size());
+    relu_backward(grad_conv1.data(), grad_conv1.data(),
+                  conv1_out.data(), grad_conv1.size());
     
     // Backward through Conv1: (32, 32, 3) -> (32, 32, 256)
     // Don't need grad_input for the first layer
     std::vector<float> temp_input(batch_size * INPUT_H * INPUT_W * INPUT_C);
     std::memcpy(temp_input.data(), input, temp_input.size() * sizeof(float));
     
-    conv2d_backward(grad_conv1_out_.data(), nullptr,
-                    grad_conv1_weights_.data(), grad_conv1_bias_.data(),
-                    temp_input.data(), conv1_weights_.data(),
+    conv2d_backward(grad_conv1.data(), nullptr,
+                    conv1_weight_grad.data(), conv1_bias_grad.data(),
+                    temp_input.data(), conv1_weight.data(),
                     batch_size, INPUT_H, INPUT_W, INPUT_C,
                     CONV1_FILTERS, 3, 1, 1);
 }
 
 void AutoencoderCPU::update_weights(float learning_rate) {
     // Simple gradient descent for weights
-    for (size_t i = 0; i < conv1_weights_.size(); ++i) {
-        conv1_weights_[i] -= learning_rate * grad_conv1_weights_[i];
+    for (size_t i = 0; i < conv1_weight.size(); ++i) {
+        conv1_weight[i] -= learning_rate * conv1_weight_grad[i];
     }
-    for (size_t i = 0; i < conv2_weights_.size(); ++i) {
-        conv2_weights_[i] -= learning_rate * grad_conv2_weights_[i];
+    for (size_t i = 0; i < conv2_weight.size(); ++i) {
+        conv2_weight[i] -= learning_rate * conv2_weight_grad[i];
     }
-    for (size_t i = 0; i < conv3_weights_.size(); ++i) {
-        conv3_weights_[i] -= learning_rate * grad_conv3_weights_[i];
+    for (size_t i = 0; i < conv3_weight.size(); ++i) {
+        conv3_weight[i] -= learning_rate * conv3_weight_grad[i];
     }
-    for (size_t i = 0; i < conv4_weights_.size(); ++i) {
-        conv4_weights_[i] -= learning_rate * grad_conv4_weights_[i];
+    for (size_t i = 0; i < conv4_weight.size(); ++i) {
+        conv4_weight[i] -= learning_rate * conv4_weight_grad[i];
     }
-    for (size_t i = 0; i < conv5_weights_.size(); ++i) {
-        conv5_weights_[i] -= learning_rate * grad_conv5_weights_[i];
+    for (size_t i = 0; i < conv5_weight.size(); ++i) {
+        conv5_weight[i] -= learning_rate * conv5_weight_grad[i];
     }
     
     // Simple gradient descent for biases
-    for (size_t i = 0; i < conv1_bias_.size(); ++i) {
-        conv1_bias_[i] -= learning_rate * grad_conv1_bias_[i];
+    for (size_t i = 0; i < conv1_bias.size(); ++i) {
+        conv1_bias[i] -= learning_rate * conv1_bias_grad[i];
     }
-    for (size_t i = 0; i < conv2_bias_.size(); ++i) {
-        conv2_bias_[i] -= learning_rate * grad_conv2_bias_[i];
+    for (size_t i = 0; i < conv2_bias.size(); ++i) {
+        conv2_bias[i] -= learning_rate * conv2_bias_grad[i];
     }
-    for (size_t i = 0; i < conv3_bias_.size(); ++i) {
-        conv3_bias_[i] -= learning_rate * grad_conv3_bias_[i];
+    for (size_t i = 0; i < conv3_bias.size(); ++i) {
+        conv3_bias[i] -= learning_rate * conv3_bias_grad[i];
     }
-    for (size_t i = 0; i < conv4_bias_.size(); ++i) {
-        conv4_bias_[i] -= learning_rate * grad_conv4_bias_[i];
+    for (size_t i = 0; i < conv4_bias.size(); ++i) {
+        conv4_bias[i] -= learning_rate * conv4_bias_grad[i];
     }
-    for (size_t i = 0; i < conv5_bias_.size(); ++i) {
-        conv5_bias_[i] -= learning_rate * grad_conv5_bias_[i];
+    for (size_t i = 0; i < conv5_bias.size(); ++i) {
+        conv5_bias[i] -= learning_rate * conv5_bias_grad[i];
     }
 }
 
@@ -514,7 +514,7 @@ void AutoencoderCPU::train(const std::vector<float>& train_images,
             // Compute loss
             float loss = compute_loss(
                 std::vector<float>(batch_data, batch_data + actual_batch_size * INPUT_H * INPUT_W * INPUT_C),
-                conv5_out_, actual_batch_size);
+                conv5_out, actual_batch_size);
             
             // Check for NaN or Inf
             if (std::isnan(loss) || std::isinf(loss)) {
@@ -565,23 +565,23 @@ void AutoencoderCPU::extract_features(const std::vector<float>& images,
         // Run encoder only
         allocate_buffers(actual_batch_size);
         
-        conv2d_forward(batch_data, conv1_out_.data(), conv1_weights_.data(), conv1_bias_.data(),
+        conv2d_forward(batch_data, conv1_out.data(), conv1_weight.data(), conv1_bias.data(),
                        actual_batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
-        relu_forward(conv1_out_.data(), conv1_out_.data(), conv1_out_.size());
+        relu_forward(conv1_out.data(), conv1_out.data(), conv1_out.size());
         
-        maxpool2d_forward(conv1_out_.data(), pool1_out_.data(),
+        maxpool2d_forward(conv1_out.data(), pool1_out.data(),
                           actual_batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
         
-        conv2d_forward(pool1_out_.data(), conv2_out_.data(), conv2_weights_.data(), conv2_bias_.data(),
+        conv2d_forward(pool1_out.data(), conv2_out.data(), conv2_weight.data(), conv2_bias.data(),
                        actual_batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
-        relu_forward(conv2_out_.data(), conv2_out_.data(), conv2_out_.size());
+        relu_forward(conv2_out.data(), conv2_out.data(), conv2_out.size());
         
-        maxpool2d_forward(conv2_out_.data(), pool2_out_.data(),
+        maxpool2d_forward(conv2_out.data(), pool2_out.data(),
                           actual_batch_size, 16, 16, CONV2_FILTERS, 2, 2);
         
         // Copy latent features
         std::memcpy(&features[start_idx * LATENT_DIM],
-                   pool2_out_.data(),
+                   pool2_out.data(),
                    actual_batch_size * LATENT_DIM * sizeof(float));
     }
 }
@@ -599,16 +599,16 @@ void AutoencoderCPU::save_weights(const std::string& filepath) {
         file.write(reinterpret_cast<const char*>(vec.data()), size * sizeof(float));
     };
     
-    write_vec(conv1_weights_);
-    write_vec(conv1_bias_);
-    write_vec(conv2_weights_);
-    write_vec(conv2_bias_);
-    write_vec(conv3_weights_);
-    write_vec(conv3_bias_);
-    write_vec(conv4_weights_);
-    write_vec(conv4_bias_);
-    write_vec(conv5_weights_);
-    write_vec(conv5_bias_);
+    write_vec(conv1_weight);
+    write_vec(conv1_bias);
+    write_vec(conv2_weight);
+    write_vec(conv2_bias);
+    write_vec(conv3_weight);
+    write_vec(conv3_bias);
+    write_vec(conv4_weight);
+    write_vec(conv4_bias);
+    write_vec(conv5_weight);
+    write_vec(conv5_bias);
     
     file.close();
     std::cout << "Weights saved to " << filepath << std::endl;
@@ -628,16 +628,16 @@ void AutoencoderCPU::load_weights(const std::string& filepath) {
         file.read(reinterpret_cast<char*>(vec.data()), size * sizeof(float));
     };
     
-    read_vec(conv1_weights_);
-    read_vec(conv1_bias_);
-    read_vec(conv2_weights_);
-    read_vec(conv2_bias_);
-    read_vec(conv3_weights_);
-    read_vec(conv3_bias_);
-    read_vec(conv4_weights_);
-    read_vec(conv4_bias_);
-    read_vec(conv5_weights_);
-    read_vec(conv5_bias_);
+    read_vec(conv1_weight);
+    read_vec(conv1_bias);
+    read_vec(conv2_weight);
+    read_vec(conv2_bias);
+    read_vec(conv3_weight);
+    read_vec(conv3_bias);
+    read_vec(conv4_weight);
+    read_vec(conv4_bias);
+    read_vec(conv5_weight);
+    read_vec(conv5_bias);
     
     file.close();
     std::cout << "Weights loaded from " << filepath << std::endl;
