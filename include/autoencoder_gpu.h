@@ -39,18 +39,6 @@ private:
     static constexpr int LATENT_C = 128;
     static constexpr int LATENT_DIM = LATENT_H * LATENT_W * LATENT_C;
     
-    // Host weight storage (mutable for save_weights const method)
-    mutable std::vector<float> h_conv1_weight;
-    mutable std::vector<float> h_conv1_bias;
-    mutable std::vector<float> h_conv2_weight;
-    mutable std::vector<float> h_conv2_bias;
-    mutable std::vector<float> h_conv3_weight;
-    mutable std::vector<float> h_conv3_bias;
-    mutable std::vector<float> h_conv4_weight;
-    mutable std::vector<float> h_conv4_bias;
-    mutable std::vector<float> h_conv5_weight;
-    mutable std::vector<float> h_conv5_bias;
-    
     // Device weight pointers
     float* d_conv1_weight;
     float* d_conv1_bias;
@@ -107,7 +95,6 @@ private:
     float* d_grad_conv1;
     
     float* d_loss;
-    float last_loss;
     
     void forward();
     void backward();

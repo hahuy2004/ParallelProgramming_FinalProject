@@ -47,18 +47,6 @@ AutoencoderGPU::AutoencoderGPU() {
         CUDA_CHECK(cudaMemset(*d_ptr, 0, size * sizeof(float)));
     };
     
-    // Initialize host weight storage
-    h_conv1_weight.resize(CONV1_FILTERS * INPUT_C * 3 * 3);
-    h_conv1_bias.resize(CONV1_FILTERS);
-    h_conv2_weight.resize(CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
-    h_conv2_bias.resize(CONV2_FILTERS);
-    h_conv3_weight.resize(LATENT_C * LATENT_C * 3 * 3);
-    h_conv3_bias.resize(LATENT_C);
-    h_conv4_weight.resize(CONV1_FILTERS * LATENT_C * 3 * 3);
-    h_conv4_bias.resize(CONV1_FILTERS);
-    h_conv5_weight.resize(INPUT_C * CONV1_FILTERS * 3 * 3);
-    h_conv5_bias.resize(INPUT_C);
-    
     // Initialize conv1: 3 -> 256, kernel 3x3
     init_and_upload(&d_conv1_weight, CONV1_FILTERS * INPUT_C * 3 * 3, INPUT_C * 3 * 3);
     init_bias(&d_conv1_bias, CONV1_FILTERS);
@@ -200,7 +188,6 @@ float AutoencoderGPU::train_step(const float* input_chw, float learning_rate) {
     CUDA_CHECK(cudaDeviceSynchronize());
     
     CUDA_CHECK(cudaMemcpy(&h_loss, d_loss, sizeof(float), cudaMemcpyDeviceToHost));
-    last_loss = h_loss;
     
     // Backward pass
     backward();
@@ -258,7 +245,7 @@ void AutoencoderGPU::train(const std::vector<float>& train_images,
         auto epoch_end = std::chrono::high_resolution_clock::now();
         float epoch_time = std::chrono::duration<float>(epoch_end - epoch_start).count();
         
-        std::cout << "Epoch avg loss: " << epoch_loss << " | time: " << epoch_time << "s" << std::endl;
+        std::cout << "Epoch avg loss: " << epoch_loss << " | Time: " << epoch_time << "s" << std::endl;
     }
     
     // Training completed summary
@@ -410,20 +397,20 @@ void AutoencoderGPU::backward() {
 }
 
 void AutoencoderGPU::update_weights(float learning_rate) {
-    launch_sgd_update(d_conv1_weight, d_conv1_weight_grad, learning_rate, h_conv1_weight.size());
-    launch_sgd_update(d_conv1_bias, d_conv1_bias_grad, learning_rate, h_conv1_bias.size());
+    launch_sgd_update(d_conv1_weight, d_conv1_weight_grad, learning_rate, CONV1_FILTERS * INPUT_C * 3 * 3);
+    launch_sgd_update(d_conv1_bias, d_conv1_bias_grad, learning_rate, CONV1_FILTERS);
     
-    launch_sgd_update(d_conv2_weight, d_conv2_weight_grad, learning_rate, h_conv2_weight.size());
-    launch_sgd_update(d_conv2_bias, d_conv2_bias_grad, learning_rate, h_conv2_bias.size());
+    launch_sgd_update(d_conv2_weight, d_conv2_weight_grad, learning_rate, CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
+    launch_sgd_update(d_conv2_bias, d_conv2_bias_grad, learning_rate, CONV2_FILTERS);
     
-    launch_sgd_update(d_conv3_weight, d_conv3_weight_grad, learning_rate, h_conv3_weight.size());
-    launch_sgd_update(d_conv3_bias, d_conv3_bias_grad, learning_rate, h_conv3_bias.size());
+    launch_sgd_update(d_conv3_weight, d_conv3_weight_grad, learning_rate, LATENT_C * LATENT_C * 3 * 3);
+    launch_sgd_update(d_conv3_bias, d_conv3_bias_grad, learning_rate, LATENT_C);
     
-    launch_sgd_update(d_conv4_weight, d_conv4_weight_grad, learning_rate, h_conv4_weight.size());
-    launch_sgd_update(d_conv4_bias, d_conv4_bias_grad, learning_rate, h_conv4_bias.size());
+    launch_sgd_update(d_conv4_weight, d_conv4_weight_grad, learning_rate, CONV1_FILTERS * LATENT_C * 3 * 3);
+    launch_sgd_update(d_conv4_bias, d_conv4_bias_grad, learning_rate, CONV1_FILTERS);
     
-    launch_sgd_update(d_conv5_weight, d_conv5_weight_grad, learning_rate, h_conv5_weight.size());
-    launch_sgd_update(d_conv5_bias, d_conv5_bias_grad, learning_rate, h_conv5_bias.size());
+    launch_sgd_update(d_conv5_weight, d_conv5_weight_grad, learning_rate, INPUT_C * CONV1_FILTERS * 3 * 3);
+    launch_sgd_update(d_conv5_bias, d_conv5_bias_grad, learning_rate, INPUT_C);
 }
 
 void AutoencoderGPU::save_weights(const std::string& filepath) {
