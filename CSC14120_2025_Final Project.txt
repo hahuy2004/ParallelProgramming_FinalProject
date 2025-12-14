@@ -33,10 +33,6 @@ inference in CUDA, while using existing libraries (LIBSVM) for the SVM classifie
 Through systematic optimization, you will accelerate the autoencoder from taking hours
 on CPU to completing in seconds on GPU.
 1.2 CIFAR-10 Dataset
-                                       Vietnam National University, Ho Chi Minh City
-                                                   University of Science
-                                            Faculty of Information Technology
-
 CIFAR-10 is one of the most widely used benchmark datasets in computer vision and
 machine learning research. It provides a challenging yet computationally manageable
 image classification task.
@@ -67,9 +63,6 @@ Autoencoder training time <10 minutes
 Feature extraction time       <20 seconds for all 60K images
 
 Test classification accuracy 60-65%
-                                           Vietnam National University, Ho Chi Minh City
-                                                       University of Science
-                                                Faculty of Information Technology
 
 Metric                           Target
 
@@ -97,9 +90,6 @@ Loss = MSE(Input, Reconstructed_Output)
 The network learns to minimize reconstruction error, forcing the encoder to capture
 essential information about the input
 Key Concepts:
-                                     Vietnam National University, Ho Chi Minh City
-                                                 University of Science
-                                          Faculty of Information Technology
 
    1. Bottleneck Layer (Latent Space):
           o   The smallest layer in the middle
@@ -129,9 +119,6 @@ Link: https://github.com/turkdogan/autoencoder
 Link: https://github.com/tbennun/cudnn-training
    • CNN references: Since your autoencoder uses convolutional layers,
      knowledge of CNNs is required
-                                     Vietnam National University, Ho Chi Minh City
-                                                 University of Science
-                                          Faculty of Information Technology
 
    ✓ This video “How Convolutional Neural Networks work” give a very good
      explanation with respect to CNNs. You can also check other good materials
@@ -164,9 +151,6 @@ Step 1: Load CIFAR-10 Images
    ✓ 50,000 training images (for autoencoder)
    ✓ 10,000 test images
    ✓ Preprocess: normalize to [0,1]
-                                  Vietnam National University, Ho Chi Minh City
-                                              University of Science
-                                       Faculty of Information Technology
 
 Step 2: Train Autoencoder (Your CUDA Code)
    ✓ Use all 50k images (unsupervised training)
@@ -204,10 +188,6 @@ features ➔ DECODER (reconstruct) ➔ OUTPUT: (32, 32, 3)
 ENCODER (Down sampling Path)
  INPUT: (32, 32, 3)
      ↓
-                                Vietnam National University, Ho Chi Minh City
-                                            University of Science
-                                     Faculty of Information Technology
-
  Conv2D(256 filters, 3×3 kernel, padding=1, stride=1) + ReLU
      → (32, 32, 256)
      ↓
@@ -258,10 +238,6 @@ Or keras setup for reference:
  x = UpSampling2D((2, 2))(x)
  x = Conv2D(256, (3, 3), activation='relu', padding='same')(x)
  x = UpSampling2D((2, 2))(x)
-                                     Vietnam National University, Ho Chi Minh City
-                                                 University of Science
-                                          Faculty of Information Technology
-
  decoded = Conv2D(3, (3, 3), padding='same')(x)
 
 
@@ -306,10 +282,6 @@ What to Implement:
    •   Parse the binary format: 1 byte label + 3,072 bytes image per record
    •   Convert uint8 pixel values [0, 255] to float [0, 1] for normalization
    •   Implement batch generation for training
-                                       Vietnam National University, Ho Chi Minh City
-                                                   University of Science
-                                            Faculty of Information Technology
-
    •   Add data shuffling capability
    •   Organize train images (50,000), test images (10,000), and their labels in memory
 1.2 CPU Neural Network Layers
@@ -332,17 +304,12 @@ Implement CPU versions of all necessary operations:
 1.4 Training
    •   Set hyperparameters: batch size (32), epochs (20), learning rate (0.001)
    •   Loop over epochs and batches
-   •   For each batch: forward pass → compute loss → backward pass → update
-       weights
+   •   For each batch: forward pass → compute loss → backward pass → update weights
    •   Track and display training loss
    •   Measure time per epoch
    •   Save trained model weights after completion
 Deliverables:
    •   Working data loading and preprocessing pipeline
-                                    Vietnam National University, Ho Chi Minh City
-                                                University of Science
-                                         Faculty of Information Technology
-
    •   Complete CPU implementation of all layers
    •   Baseline performance measurements
 Phase 2: Naive GPU Implementation
@@ -371,10 +338,6 @@ MaxPooling Kernel:
    •   Writes result to output
 Upsampling Kernel:
    •   Each thread computes one output pixel
-                                    Vietnam National University, Ho Chi Minh City
-                                                University of Science
-                                         Faculty of Information Technology
-
    •   Maps output coordinates back to input coordinates (divide by 2)
    •   Copies input value to output (nearest neighbour)
 MSE Loss Kernel:
@@ -403,10 +366,6 @@ Design gradient computation kernels:
 Deliverables:
    •   All layers successfully ported to GPU
    •   Working GPU training loop
-                                    Vietnam National University, Ho Chi Minh City
-                                                University of Science
-                                         Faculty of Information Technology
-
    •   Forward and backward passes implemented
    •   Correctness verification against CPU results
 Phase 3: Advanced Optimization
@@ -438,10 +397,6 @@ Reallocate all necessary buffers once and reuse them across batches/epochs. Elim
 repeated cudaMalloc/cudaFree overhead which can be significant.
 Category 2: Kernel-Level Optimization
 8. Kernel Fusion (Conv + ReLU + Bias)
-                                     Vietnam National University, Ho Chi Minh City
-                                                 University of Science
-                                          Faculty of Information Technology
-
 Combine multiple operations into single kernel to eliminate intermediate global
 memory writes/reads. Reduces memory bandwidth requirements and improves
 arithmetic intensity.
@@ -466,13 +421,6 @@ Category 3: Parallelism & Concurrency
 
 Phase 4: SVM Integration and analysed result
 Objective: Complete the pipeline and thoroughly evaluate performance.
-                                      Vietnam National University, Ho Chi Minh City
-                                                  University of Science
-                                           Faculty of Information Technology
-
-
-
-
 6. Project Report
 Report Format and Structure
 Submission Format
@@ -500,10 +448,6 @@ Section 2: Implementation Phases
 For each phase, provide a structured description following this template:
 Phase 2.1: CPU Baseline Implementation
 Objectives:
-                                     Vietnam National University, Ho Chi Minh City
-                                                 University of Science
-                                          Faculty of Information Technology
-
    •   What you aimed to achieve in this phase
    •   Why this phase is necessary
 Implementation Details:
@@ -534,10 +478,6 @@ Implementation Details:
            o   Convolution kernel: thread-to-output mapping
            o   Pooling kernel: how threads handle 2×2 windows
            o   Other kernels (ReLU, upsampling)
-                                      Vietnam National University, Ho Chi Minh City
-                                                  University of Science
-                                           Faculty of Information Technology
-
    •   Memory Management: Device memory allocation strategy
    •   Key Code Snippets: Show kernel signatures and launch configurations
 Results:
@@ -567,11 +507,7 @@ Implementation Details:
    •   Key Code Snippets: Show the optimized kernel or key changes
 Results:
    •   Training time comparison with previous version
-                                     Vietnam National University, Ho Chi Minh City
-                                                 University of Science
-                                          Faculty of Information Technology
-
-   •   Speedup over previous phase (incremental and cumulative)
+  •   Speedup over previous phase (incremental and cumulative)
    •   Performance metrics (bandwidth utilization, occupancy)
    •   Profiling comparison: before vs after
 Analysis:
@@ -601,11 +537,7 @@ Objectives:
    •   Train SVM classifier on learned features
    •   Evaluate end-to-end classification performance
 Implementation Details:
-                                      Vietnam National University, Ho Chi Minh City
-                                                  University of Science
-                                           Faculty of Information Technology
-
-   •    Feature Extraction: How you extracted 1,024-dim features from encoder
+  •    Feature Extraction: How you extracted 1,024-dim features from encoder
    •    LIBSVM Integration: How you interfaced with LIBSVM
    •    Hyperparameter Selection: SVM parameters chosen (C, gamma, kernel)
    •    Key Code Snippets: Feature extraction and SVM training code
@@ -637,10 +569,6 @@ Phase
 CPU
              1800s       1.0×           -                -           -
 Baseline
-                                     Vietnam National University, Ho Chi Minh City
-                                                 University of Science
-                                          Faculty of Information Technology
-
              Training    Speedup (vs Incremental        Memory      Key
 Phase
              Time        CPU)        Speedup            Usage       Optimization
@@ -679,10 +607,6 @@ Section 5: Conclusion and Future Work
 Highlight your best results:
    •    Maximum speedup achieved
    •    Classification accuracy
-                                       Vietnam National University, Ho Chi Minh City
-                                                   University of Science
-                                            Faculty of Information Technology
-
    •   Most successful optimization
    •   Technical skills mastered
 5.3 Limitations
@@ -712,11 +636,6 @@ You must submit the following items:
           o   Compilation commands
           o   Execution instructions with example commands
           o   Hardware requirements (GPU model, memory)
-          o   Expected outputs
-                                    Vietnam National University, Ho Chi Minh City
-                                                University of Science
-                                         Faculty of Information Technology
-
    •   Trained model weights (if file size permits, otherwise provide download link)
 4. Presentation Video (15-20 minutes)
    •   Upload to YouTube with Unlisted visibility
@@ -727,4 +646,3 @@ Video Content Should Cover:
    •   Live demonstration of running code (5-7 min)
    •   Performance results and analysis (5-7 min)
    •   Key optimizations and lessons learned (3-5 min)
-
