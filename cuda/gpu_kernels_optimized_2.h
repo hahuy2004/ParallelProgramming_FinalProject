@@ -2,24 +2,26 @@
 #define GPU_KERNELS_OPTIMIZED_2_H
 
 // Sử dụng fused Conv2D + ReLU + Bias
-void launch_conv2d_forward_relu_fused(const float* d_input, float* d_output,
-                                     const float* d_weights, const float* d_bias,
-                                     int batch, int in_h, int in_w, int in_c,
-                                     int out_c, int kernel_size, int stride, int padding);
+void launch_conv2d_relu_forward(
+    const float* input,
+    const float* weight,
+    const float* bias,
+    float* output,
+    int C_in, int H_in, int W_in,
+    int C_out, int H_out, int W_out,
+    int kernel_size, int stride, int padding);
 
 // Sử dụng unroll looping cho các vòng duyệt kernel kích thước nhỏ như poolsize =2
-void launch_maxpool2d_optimized_forward(const float* d_input, float* d_output, float* indices,
-                                    int batch, int h, int w, int c,
-                                    int pool_size, int stride);
+void launch_maxpool_unroll_forward(
+    const float* input,
+    float* output,
+    int C, int H, int W,
+    int pool_size, int stride);
                                     
-// Sử dụng unroll looping cho các vòng duyệt kernel kích thước nhỏ + fused
-void launch_conv2d_relu_backward_fused(const float* d_grad_output, 
-                                       const float* d_input,
-                                       const float* d_weights, 
-                                       const float* d_conv_output,
-                                       float* d_grad_input,
-                                       float* d_grad_weights, 
-                                       float* d_grad_bias,
-                                       int batch, int in_h, int in_w, int in_c,
-                                       int out_c, int kernel_size, int stride, int padding);
+void launch_maxpool_unroll_backward(
+    const float* grad_output,
+    const float* input,
+    float* grad_input,
+    int C, int H, int W,
+    int pool_size, int stride);
 #endif // GPU_KERNELS_OPTIMIZED_2_H
