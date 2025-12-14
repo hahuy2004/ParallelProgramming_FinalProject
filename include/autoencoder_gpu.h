@@ -21,6 +21,11 @@ public:
                          int num_images,
                          std::vector<float>& features);
     
+    // Inference (full forward pass: encoder + decoder)
+    void infer(const std::vector<float>& images,
+               int num_images,
+               std::vector<float>& reconstructions);
+    
     // Save/Load weights
     void save_weights(const std::string& filepath);
     void load_weights(const std::string& filepath);
