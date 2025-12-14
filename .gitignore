@@ -85,4 +85,5 @@ third_lib/libsvm
 third_lib/cuml
 third_lib/thundersvm
 
-features/gpu_optimized_1/
+features/gpu_*
+features/cpu_*

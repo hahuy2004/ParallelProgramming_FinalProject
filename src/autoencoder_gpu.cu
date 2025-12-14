@@ -1,725 +1,839 @@
+// Naive GPU Implementation - Based on FinalCuda autoencoder_basic.cu
 #include "../include/autoencoder_gpu.h"
-#include "../cuda/gpu_kernels.h"
 #include <cuda_runtime.h>
 #include <iostream>
-#include <iomanip>
+#include <vector>
+#include <cmath>
 #include <fstream>
-#include <chrono>
-#include <cstring>
-#include <random>
+#include <cstdlib>
+#include <ctime>
 
+// Error checking macro
 #define CUDA_CHECK(call) \
     do { \
         cudaError_t err = call; \
         if (err != cudaSuccess) { \
-            fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, \
-                    cudaGetErrorString(err)); \
+            std::cerr << "CUDA Error: " << cudaGetErrorString(err) \
+                      << " at " << __FILE__ << ":" << __LINE__ << std::endl; \
             exit(EXIT_FAILURE); \
         } \
     } while(0)
 
-AutoencoderGPU::AutoencoderGPU() : current_batch_size_(0) {
-    // Initialize all pointers to nullptr
-    d_conv1_weights_ = nullptr;
-    d_conv1_bias_ = nullptr;
-    d_conv2_weights_ = nullptr;
-    d_conv2_bias_ = nullptr;
-    d_conv3_weights_ = nullptr;
-    d_conv3_bias_ = nullptr;
-    d_conv4_weights_ = nullptr;
-    d_conv4_bias_ = nullptr;
-    d_conv5_weights_ = nullptr;
-    d_conv5_bias_ = nullptr;
+// ============================================================================
+// CUDA KERNELS - FORWARD PASS
+// ============================================================================
+
+// Conv2D kernel: Basic implementation
+__global__ void conv2d_kernel(
+    const float* input,   // [C_in, H, W]
+    const float* weight,  // [C_out, C_in, K, K]
+    const float* bias,    // [C_out]
+    float* output,        // [C_out, H_out, W_out]
+    int C_in, int H_in, int W_in,
+    int C_out, int H_out, int W_out,
+    int K, int pad)
+{
+    int oc = blockIdx.x;  // Output channel
+    int oh = blockIdx.y * blockDim.y + threadIdx.y;  // Output height
+    int ow = blockIdx.z * blockDim.z + threadIdx.z;  // Output width
     
-    d_input_ = nullptr;
-    d_conv1_out_ = nullptr;
-    d_pool1_out_ = nullptr;
-    d_indices1_ = nullptr;
-    d_conv2_out_ = nullptr;
-    d_pool2_out_ = nullptr;
-    d_indices2_ = nullptr;
-    d_conv3_out_ = nullptr;
-    d_up1_out_ = nullptr;
-    d_conv4_out_ = nullptr;
-    d_up2_out_ = nullptr;
-    d_conv5_out_ = nullptr;
+    if (oc >= C_out || oh >= H_out || ow >= W_out) return;
     
-    d_grad_conv5_out_ = nullptr;
-    d_grad_up2_out_ = nullptr;
-    d_grad_conv4_out_ = nullptr;
-    d_grad_up1_out_ = nullptr;
-    d_grad_conv3_out_ = nullptr;
-    d_grad_pool2_out_ = nullptr;
-    d_grad_conv2_out_ = nullptr;
-    d_grad_pool1_out_ = nullptr;
-    d_grad_conv1_out_ = nullptr;
+    float sum = 0.0f;
     
-    d_grad_conv1_weights_ = nullptr;
-    d_grad_conv1_bias_ = nullptr;
-    d_grad_conv2_weights_ = nullptr;
-    d_grad_conv2_bias_ = nullptr;
-    d_grad_conv3_weights_ = nullptr;
-    d_grad_conv3_bias_ = nullptr;
-    d_grad_conv4_weights_ = nullptr;
-    d_grad_conv4_bias_ = nullptr;
-    d_grad_conv5_weights_ = nullptr;
-    d_grad_conv5_bias_ = nullptr;
+    // Convolution operation
+    for (int ic = 0; ic < C_in; ic++) {
+        for (int kh = 0; kh < K; kh++) {
+            for (int kw = 0; kw < K; kw++) {
+                int ih = oh + kh - pad;
+                int iw = ow + kw - pad;
+                
+                float input_val = 0.0f;
+                if (ih >= 0 && ih < H_in && iw >= 0 && iw < W_in) {
+                    input_val = input[ic * H_in * W_in + ih * W_in + iw];
+                }
+                
+                int weight_idx = ((oc * C_in + ic) * K + kh) * K + kw;
+                sum += input_val * weight[weight_idx];
+            }
+        }
+    }
     
-    d_loss_ = nullptr;
+    sum += bias[oc];
+    output[oc * H_out * W_out + oh * W_out + ow] = sum;
+}
+
+// ReLU activation kernel
+__global__ void relu_kernel(const float* input, float* output, int size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        output[idx] = fmaxf(0.0f, input[idx]);
+    }
+}
+
+// MaxPool2D kernel (2x2, stride 2)
+__global__ void maxpool_kernel(
+    const float* input,   // [C, H, W]
+    float* output,        // [C, H/2, W/2]
+    int C, int H, int W)
+{
+    int c = blockIdx.x;
+    int oh = blockIdx.y * blockDim.y + threadIdx.y;
+    int ow = blockIdx.z * blockDim.z + threadIdx.z;
     
-    initialize_weights();
+    int H_out = H / 2;
+    int W_out = W / 2;
+    
+    if (c >= C || oh >= H_out || ow >= W_out) return;
+    
+    int ih = oh * 2;
+    int iw = ow * 2;
+    
+    float max_val = input[c * H * W + ih * W + iw];
+    max_val = fmaxf(max_val, input[c * H * W + ih * W + (iw + 1)]);
+    max_val = fmaxf(max_val, input[c * H * W + (ih + 1) * W + iw]);
+    max_val = fmaxf(max_val, input[c * H * W + (ih + 1) * W + (iw + 1)]);
+    
+    output[c * H_out * W_out + oh * W_out + ow] = max_val;
+}
+
+// Upsample2x kernel (nearest neighbor)
+__global__ void upsample_kernel(
+    const float* input,   // [C, H, W]
+    float* output,        // [C, H*2, W*2]
+    int C, int H, int W)
+{
+    int c = blockIdx.x;
+    int oh = blockIdx.y * blockDim.y + threadIdx.y;
+    int ow = blockIdx.z * blockDim.z + threadIdx.z;
+    
+    int H_out = H * 2;
+    int W_out = W * 2;
+    
+    if (c >= C || oh >= H_out || ow >= W_out) return;
+    
+    int ih = oh / 2;
+    int iw = ow / 2;
+    
+    float val = input[c * H * W + ih * W + iw];
+    output[c * H_out * W_out + oh * W_out + ow] = val;
+}
+
+// ============================================================================
+// CUDA KERNELS - BACKWARD PASS
+// ============================================================================
+
+// ReLU backward kernel
+__global__ void relu_backward_kernel(
+    const float* grad_output,
+    const float* input,
+    float* grad_input,
+    int size)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        grad_input[idx] = (input[idx] > 0.0f) ? grad_output[idx] : 0.0f;
+    }
+}
+
+// MaxPool backward kernel
+__global__ void maxpool_backward_kernel(
+    const float* grad_output,  // [C, H/2, W/2]
+    const float* input,        // [C, H, W]
+    float* grad_input,         // [C, H, W]
+    int C, int H, int W)
+{
+    int c = blockIdx.x;
+    int oh = blockIdx.y * blockDim.y + threadIdx.y;
+    int ow = blockIdx.z * blockDim.z + threadIdx.z;
+    
+    int H_out = H / 2;
+    int W_out = W / 2;
+    
+    if (c >= C || oh >= H_out || ow >= W_out) return;
+    
+    int ih = oh * 2;
+    int iw = ow * 2;
+    
+    // Find which position had the max value
+    float max_val = input[c * H * W + ih * W + iw];
+    int max_i = ih, max_j = iw;
+    
+    float val = input[c * H * W + ih * W + (iw + 1)];
+    if (val > max_val) { max_val = val; max_i = ih; max_j = iw + 1; }
+    
+    val = input[c * H * W + (ih + 1) * W + iw];
+    if (val > max_val) { max_val = val; max_i = ih + 1; max_j = iw; }
+    
+    val = input[c * H * W + (ih + 1) * W + (iw + 1)];
+    if (val > max_val) { max_val = val; max_i = ih + 1; max_j = iw + 1; }
+    
+    // Only pass gradient to the max position
+    float grad = grad_output[c * H_out * W_out + oh * W_out + ow];
+    atomicAdd(&grad_input[c * H * W + max_i * W + max_j], grad);
+}
+
+// Upsample backward kernel
+__global__ void upsample_backward_kernel(
+    const float* grad_output,  // [C, H*2, W*2]
+    float* grad_input,         // [C, H, W]
+    int C, int H, int W)
+{
+    int c = blockIdx.x;
+    int ih = blockIdx.y * blockDim.y + threadIdx.y;
+    int iw = blockIdx.z * blockDim.z + threadIdx.z;
+    
+    if (c >= C || ih >= H || iw >= W) return;
+    
+    int H_out = H * 2;
+    int W_out = W * 2;
+    
+    // Sum gradients from all 4 upsampled positions
+    float sum = 0.0f;
+    sum += grad_output[c * H_out * W_out + (ih * 2) * W_out + (iw * 2)];
+    sum += grad_output[c * H_out * W_out + (ih * 2) * W_out + (iw * 2 + 1)];
+    sum += grad_output[c * H_out * W_out + (ih * 2 + 1) * W_out + (iw * 2)];
+    sum += grad_output[c * H_out * W_out + (ih * 2 + 1) * W_out + (iw * 2 + 1)];
+    
+    grad_input[c * H * W + ih * W + iw] = sum;
+}
+
+// Conv2D weight gradient kernel
+__global__ void conv2d_weight_grad_kernel(
+    const float* grad_output,  // [C_out, H_out, W_out]
+    const float* input,        // [C_in, H_in, W_in]
+    float* weight_grad,        // [C_out, C_in, K, K]
+    int C_in, int H_in, int W_in,
+    int C_out, int H_out, int W_out,
+    int K, int pad)
+{
+    int oc = blockIdx.x;
+    int ic = blockIdx.y;
+    int k_idx = threadIdx.x;  // Flattened kernel index (kh*K + kw)
+    
+    if (oc >= C_out || ic >= C_in || k_idx >= K * K) return;
+    
+    int kh = k_idx / K;
+    int kw = k_idx % K;
+    
+    float sum = 0.0f;
+    for (int oh = 0; oh < H_out; oh++) {
+        for (int ow = 0; ow < W_out; ow++) {
+            int ih = oh + kh - pad;
+            int iw = ow + kw - pad;
+            
+            if (ih >= 0 && ih < H_in && iw >= 0 && iw < W_in) {
+                float grad = grad_output[oc * H_out * W_out + oh * W_out + ow];
+                float inp = input[ic * H_in * W_in + ih * W_in + iw];
+                sum += grad * inp;
+            }
+        }
+    }
+    
+    int weight_idx = ((oc * C_in + ic) * K + kh) * K + kw;
+    weight_grad[weight_idx] = sum;
+}
+
+// Conv2D bias gradient kernel
+__global__ void conv2d_bias_grad_kernel(
+    const float* grad_output,  // [C_out, H_out, W_out]
+    float* bias_grad,          // [C_out]
+    int C_out, int H_out, int W_out)
+{
+    int oc = blockIdx.x * blockDim.x + threadIdx.x;
+    if (oc >= C_out) return;
+    
+    float sum = 0.0f;
+    for (int oh = 0; oh < H_out; oh++) {
+        for (int ow = 0; ow < W_out; ow++) {
+            sum += grad_output[oc * H_out * W_out + oh * W_out + ow];
+        }
+    }
+    bias_grad[oc] = sum;
+}
+
+// Conv2D input gradient kernel
+__global__ void conv2d_input_grad_kernel(
+    const float* grad_output,  // [C_out, H_out, W_out]
+    const float* weight,       // [C_out, C_in, K, K]
+    float* grad_input,         // [C_in, H_in, W_in]
+    int C_in, int H_in, int W_in,
+    int C_out, int H_out, int W_out,
+    int K, int pad)
+{
+    int ic = blockIdx.x;
+    int ih = blockIdx.y * blockDim.y + threadIdx.y;
+    int iw = blockIdx.z * blockDim.z + threadIdx.z;
+    
+    if (ic >= C_in || ih >= H_in || iw >= W_in) return;
+    
+    float sum = 0.0f;
+    for (int oc = 0; oc < C_out; oc++) {
+        for (int kh = 0; kh < K; kh++) {
+            for (int kw = 0; kw < K; kw++) {
+                int oh = ih - kh + pad;
+                int ow = iw - kw + pad;
+                
+                if (oh >= 0 && oh < H_out && ow >= 0 && ow < W_out) {
+                    float grad = grad_output[oc * H_out * W_out + oh * W_out + ow];
+                    int weight_idx = ((oc * C_in + ic) * K + kh) * K + kw;
+                    sum += grad * weight[weight_idx];
+                }
+            }
+        }
+    }
+    
+    grad_input[ic * H_in * W_in + ih * W_in + iw] = sum;
+}
+
+// MSE Loss and gradient kernel
+__global__ void mse_loss_kernel(
+    const float* pred,
+    const float* target,
+    float* loss,
+    float* grad,
+    int size)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        float diff = pred[idx] - target[idx];
+        grad[idx] = 2.0f * diff / size;
+        atomicAdd(loss, diff * diff / size);
+    }
+}
+
+// Weight update kernel (Simple SGD with gradient clipping)
+__global__ void sgd_update_kernel(
+    float* weight,
+    const float* grad,
+    float learning_rate,
+    int size)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        float g = grad[idx];
+        // Check for NaN/Inf first
+        if (isnan(g) || isinf(g)) {
+            g = 0.0f;
+        } else {
+            // Clip gradient to prevent explosion
+            if (g > 5.0f) g = 5.0f;
+            if (g < -5.0f) g = -5.0f;
+        }
+        weight[idx] -= learning_rate * g;
+    }
+}
+
+// ============================================================================
+// AUTOENCODER CLASS IMPLEMENTATION
+// ============================================================================
+
+AutoencoderGPU::AutoencoderGPU() : last_loss(0.0f) {
+    // Initialize weights on host
+    h_conv1_w.resize(256 * 3 * 3 * 3);
+    h_conv1_b.resize(256);
+    h_conv2_w.resize(128 * 256 * 3 * 3);
+    h_conv2_b.resize(128);
+    h_conv3_w.resize(128 * 128 * 3 * 3);
+    h_conv3_b.resize(128);
+    h_conv4_w.resize(256 * 128 * 3 * 3);
+    h_conv4_b.resize(256);
+    h_conv5_w.resize(3 * 256 * 3 * 3);
+    h_conv5_b.resize(3);
+    
+    // Simple random initialization (same as CPU)
+    srand(42);  // Fixed seed for reproducibility
+    for (auto& w : h_conv1_w) w = ((rand() % 100) / 500.0f - 0.1f);
+    for (auto& w : h_conv2_w) w = ((rand() % 100) / 500.0f - 0.1f);
+    for (auto& w : h_conv3_w) w = ((rand() % 100) / 500.0f - 0.1f);
+    for (auto& w : h_conv4_w) w = ((rand() % 100) / 500.0f - 0.1f);
+    for (auto& w : h_conv5_w) w = ((rand() % 100) / 500.0f - 0.1f);
+    
+    std::fill(h_conv1_b.begin(), h_conv1_b.end(), 0.0f);
+    std::fill(h_conv2_b.begin(), h_conv2_b.end(), 0.0f);
+    std::fill(h_conv3_b.begin(), h_conv3_b.end(), 0.0f);
+    std::fill(h_conv4_b.begin(), h_conv4_b.end(), 0.0f);
+    std::fill(h_conv5_b.begin(), h_conv5_b.end(), 0.0f);
+    
+    // Allocate device memory for weights
+    CUDA_CHECK(cudaMalloc(&d_conv1_w, h_conv1_w.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv1_b, h_conv1_b.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv2_w, h_conv2_w.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv2_b, h_conv2_b.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv3_w, h_conv3_w.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv3_b, h_conv3_b.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv4_w, h_conv4_w.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv4_b, h_conv4_b.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv5_w, h_conv5_w.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv5_b, h_conv5_b.size() * sizeof(float)));
+    
+    // Copy weights to device
+    CUDA_CHECK(cudaMemcpy(d_conv1_w, h_conv1_w.data(), h_conv1_w.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv1_b, h_conv1_b.data(), h_conv1_b.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv2_w, h_conv2_w.data(), h_conv2_w.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv2_b, h_conv2_b.data(), h_conv2_b.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv3_w, h_conv3_w.data(), h_conv3_w.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv3_b, h_conv3_b.data(), h_conv3_b.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv4_w, h_conv4_w.data(), h_conv4_w.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv4_b, h_conv4_b.data(), h_conv4_b.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv5_w, h_conv5_w.data(), h_conv5_w.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv5_b, h_conv5_b.data(), h_conv5_b.size() * sizeof(float), cudaMemcpyHostToDevice));
+    
+    // Allocate device memory for gradients
+    CUDA_CHECK(cudaMalloc(&d_conv1_w_grad, h_conv1_w.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv1_b_grad, h_conv1_b.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv2_w_grad, h_conv2_w.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv2_b_grad, h_conv2_b.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv3_w_grad, h_conv3_w.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv3_b_grad, h_conv3_b.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv4_w_grad, h_conv4_w.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv4_b_grad, h_conv4_b.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv5_w_grad, h_conv5_w.size() * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv5_b_grad, h_conv5_b.size() * sizeof(float)));
+    
+    // Allocate device memory for activations
+    CUDA_CHECK(cudaMalloc(&d_input, 3 * 32 * 32 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv1_out, 256 * 32 * 32 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_relu1_out, 256 * 32 * 32 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_pool1_out, 256 * 16 * 16 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv2_out, 128 * 16 * 16 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_relu2_out, 128 * 16 * 16 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_pool2_out, 128 * 8 * 8 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv3_out, 128 * 8 * 8 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_relu3_out, 128 * 8 * 8 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_up1_out, 128 * 16 * 16 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv4_out, 256 * 16 * 16 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_relu4_out, 256 * 16 * 16 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_up2_out, 256 * 32 * 32 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_conv5_out, 3 * 32 * 32 * sizeof(float)));
+    
+    // Allocate device memory for gradients
+    CUDA_CHECK(cudaMalloc(&d_grad_conv5, 3 * 32 * 32 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_up2, 256 * 32 * 32 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_relu4, 256 * 16 * 16 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv4, 256 * 16 * 16 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_up1, 128 * 16 * 16 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_relu3, 128 * 8 * 8 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv3, 128 * 8 * 8 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_pool2, 128 * 16 * 16 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_relu2, 128 * 16 * 16 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv2, 128 * 16 * 16 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_pool1, 256 * 32 * 32 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_relu1, 256 * 32 * 32 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_grad_conv1, 256 * 32 * 32 * sizeof(float)));
+    
+    CUDA_CHECK(cudaMalloc(&d_loss, sizeof(float)));
+    
+    std::cout << "GPU Autoencoder initialized (Naive)" << std::endl;
 }
 
 AutoencoderGPU::~AutoencoderGPU() {
-    free_device_memory();
+    // Free all device memory
+    cudaFree(d_conv1_w); cudaFree(d_conv1_b);
+    cudaFree(d_conv2_w); cudaFree(d_conv2_b);
+    cudaFree(d_conv3_w); cudaFree(d_conv3_b);
+    cudaFree(d_conv4_w); cudaFree(d_conv4_b);
+    cudaFree(d_conv5_w); cudaFree(d_conv5_b);
+    
+    cudaFree(d_conv1_w_grad); cudaFree(d_conv1_b_grad);
+    cudaFree(d_conv2_w_grad); cudaFree(d_conv2_b_grad);
+    cudaFree(d_conv3_w_grad); cudaFree(d_conv3_b_grad);
+    cudaFree(d_conv4_w_grad); cudaFree(d_conv4_b_grad);
+    cudaFree(d_conv5_w_grad); cudaFree(d_conv5_b_grad);
+    
+    cudaFree(d_input);
+    cudaFree(d_conv1_out); cudaFree(d_relu1_out); cudaFree(d_pool1_out);
+    cudaFree(d_conv2_out); cudaFree(d_relu2_out); cudaFree(d_pool2_out);
+    cudaFree(d_conv3_out); cudaFree(d_relu3_out); cudaFree(d_up1_out);
+    cudaFree(d_conv4_out); cudaFree(d_relu4_out); cudaFree(d_up2_out);
+    cudaFree(d_conv5_out);
+    
+    cudaFree(d_grad_conv5); cudaFree(d_grad_up2); cudaFree(d_grad_relu4);
+    cudaFree(d_grad_conv4); cudaFree(d_grad_up1); cudaFree(d_grad_relu3);
+    cudaFree(d_grad_conv3); cudaFree(d_grad_pool2); cudaFree(d_grad_relu2);
+    cudaFree(d_grad_conv2); cudaFree(d_grad_pool1); cudaFree(d_grad_relu1);
+    cudaFree(d_grad_conv1);
+    
+    cudaFree(d_loss);
 }
 
-void AutoencoderGPU::initialize_weights() {
-    // std::random_device rd;
-    // std::mt19937 gen(rd());
-    std::mt19937 gen(42);      // Fixed seed for reproducibility
+float AutoencoderGPU::train_step(const float* input_chw, float learning_rate) {
+    // Copy input to device
+    CUDA_CHECK(cudaMemcpy(d_input, input_chw, 3*32*32*sizeof(float), cudaMemcpyHostToDevice));
+
+    // Forward pass
+    forward();
     
-    auto init_and_upload = [&](float** d_ptr, int size, int fan_in) {
-        std::vector<float> h_weights(size);
-        float std = std::sqrt(2.0f / fan_in);
-        std::normal_distribution<float> dist(0.0f, std);
-        for (auto& w : h_weights) w = dist(gen);
+    // Compute loss and gradient
+    float h_loss = 0.0f;
+    CUDA_CHECK(cudaMemset(d_loss, 0, sizeof(float)));
+    
+    int size = 3 * 32 * 32;
+    int threads = 256;
+    int blocks = (size + threads - 1) / threads;
+    mse_loss_kernel<<<blocks, threads>>>(d_conv5_out, d_input, d_loss, d_grad_conv5, size);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+    
+    CUDA_CHECK(cudaMemcpy(&h_loss, d_loss, sizeof(float), cudaMemcpyDeviceToHost));
+    last_loss = h_loss;
+    
+    // Backward pass
+    backward();
+    
+    // Update weights
+    update_weights(learning_rate);
+    CUDA_CHECK(cudaDeviceSynchronize());
+    
+    return h_loss;
+}
+
+void AutoencoderGPU::forward() {
+    dim3 threads(1, 16, 16);
+    
+    // Conv1: (3, 32, 32) -> (256, 32, 32)
+    dim3 blocks1(256, 2, 2);
+    conv2d_kernel<<<blocks1, threads>>>(d_input, d_conv1_w, d_conv1_b, d_conv1_out,
+                                        3, 32, 32, 256, 32, 32, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // ReLU1
+    relu_kernel<<<(256*32*32 + 255)/256, 256>>>(d_conv1_out, d_relu1_out, 256*32*32);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // MaxPool1: (256, 32, 32) -> (256, 16, 16)
+    dim3 blocks_pool1(256, 1, 1);
+    dim3 threads_pool1(1, 16, 16);
+    maxpool_kernel<<<blocks_pool1, threads_pool1>>>(d_relu1_out, d_pool1_out, 256, 32, 32);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // Conv2: (256, 16, 16) -> (128, 16, 16)
+    dim3 blocks2(128, 1, 1);
+    conv2d_kernel<<<blocks2, threads>>>(d_pool1_out, d_conv2_w, d_conv2_b, d_conv2_out,
+                                        256, 16, 16, 128, 16, 16, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // ReLU2
+    relu_kernel<<<(128*16*16 + 255)/256, 256>>>(d_conv2_out, d_relu2_out, 128*16*16);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // MaxPool2: (128, 16, 16) -> (128, 8, 8)
+    dim3 blocks_pool2(128, 1, 1);
+    dim3 threads_pool2(1, 8, 8);
+    maxpool_kernel<<<blocks_pool2, threads_pool2>>>(d_relu2_out, d_pool2_out, 128, 16, 16);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // === DECODER ===
+    
+    // Conv3: (128, 8, 8) -> (128, 8, 8)
+    dim3 blocks3(128, 1, 1);
+    dim3 threads3(1, 8, 8);
+    conv2d_kernel<<<blocks3, threads3>>>(d_pool2_out, d_conv3_w, d_conv3_b, d_conv3_out,
+                                         128, 8, 8, 128, 8, 8, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // ReLU3
+    relu_kernel<<<(128*8*8 + 255)/256, 256>>>(d_conv3_out, d_relu3_out, 128*8*8);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // Upsample1: (128, 8, 8) -> (128, 16, 16)
+    dim3 blocks_up1(128, 1, 1);
+    upsample_kernel<<<blocks_up1, threads>>>(d_relu3_out, d_up1_out, 128, 8, 8);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // Conv4: (128, 16, 16) -> (256, 16, 16)
+    dim3 blocks4(256, 1, 1);
+    conv2d_kernel<<<blocks4, threads>>>(d_up1_out, d_conv4_w, d_conv4_b, d_conv4_out,
+                                        128, 16, 16, 256, 16, 16, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // ReLU4
+    relu_kernel<<<(256*16*16 + 255)/256, 256>>>(d_conv4_out, d_relu4_out, 256*16*16);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // Upsample2: (256, 16, 16) -> (256, 32, 32)
+    dim3 blocks_up2(256, 2, 2);
+    upsample_kernel<<<blocks_up2, threads>>>(d_relu4_out, d_up2_out, 256, 16, 16);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // Conv5: (256, 32, 32) -> (3, 32, 32)
+    dim3 blocks5(3, 2, 2);
+    conv2d_kernel<<<blocks5, threads>>>(d_up2_out, d_conv5_w, d_conv5_b, d_conv5_out,
+                                        256, 32, 32, 3, 32, 32, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
+}
+
+void AutoencoderGPU::backward() {
+    CUDA_CHECK(cudaMemset(d_grad_relu1, 0, 256 * 32 * 32 * sizeof(float)));
+    CUDA_CHECK(cudaMemset(d_grad_relu2, 0, 128 * 16 * 16 * sizeof(float)));
+    
+    // Conv5 backward
+    dim3 blocks5_w(3, 256);
+    conv2d_weight_grad_kernel<<<blocks5_w, 9>>>(d_grad_conv5, d_up2_out, d_conv5_w_grad,
+                                                256, 32, 32, 3, 32, 32, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
+
+    conv2d_bias_grad_kernel<<<1, 3>>>(d_grad_conv5, d_conv5_b_grad, 3, 32, 32);
+    CUDA_CHECK(cudaGetLastError());
+
+    dim3 blocks5_in(256, 2, 2);
+    dim3 threads5(1, 16, 16);
+    conv2d_input_grad_kernel<<<blocks5_in, threads5>>>(d_grad_conv5, d_conv5_w, d_grad_up2,
+                                                    256, 32, 32, 3, 32, 32, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
         
-        CUDA_CHECK(cudaMalloc(d_ptr, size * sizeof(float)));
-        CUDA_CHECK(cudaMemcpy(*d_ptr, h_weights.data(), size * sizeof(float), cudaMemcpyHostToDevice));
-    };
-    
-    auto init_bias = [&](float** d_ptr, int size) {
-        CUDA_CHECK(cudaMalloc(d_ptr, size * sizeof(float)));
-        CUDA_CHECK(cudaMemset(*d_ptr, 0, size * sizeof(float)));
-    };
-    
-    // Initialize conv1: 3 -> 256, kernel 3x3
-    init_and_upload(&d_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3, INPUT_C * 3 * 3);
-    init_bias(&d_conv1_bias_, CONV1_FILTERS);
-    
-    // Initialize conv2: 256 -> 128, kernel 3x3
-    init_and_upload(&d_conv2_weights_, CONV2_FILTERS * CONV1_FILTERS * 3 * 3, CONV1_FILTERS * 3 * 3);
-    init_bias(&d_conv2_bias_, CONV2_FILTERS);
-    
-    // Initialize conv3: 128 -> 128, kernel 3x3
-    init_and_upload(&d_conv3_weights_, LATENT_C * LATENT_C * 3 * 3, LATENT_C * 3 * 3);
-    init_bias(&d_conv3_bias_, LATENT_C);
-    
-    // Initialize conv4: 128 -> 256, kernel 3x3
-    init_and_upload(&d_conv4_weights_, CONV1_FILTERS * LATENT_C * 3 * 3, LATENT_C * 3 * 3);
-    init_bias(&d_conv4_bias_, CONV1_FILTERS);
-    
-    // Initialize conv5: 256 -> 3, kernel 3x3
-    init_and_upload(&d_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3, CONV1_FILTERS * 3 * 3);
-    init_bias(&d_conv5_bias_, INPUT_C);
-    
-    // Allocate loss buffer
-    CUDA_CHECK(cudaMalloc(&d_loss_, sizeof(float)));
-    
-    // Allocate gradient buffers for weights
-    CUDA_CHECK(cudaMalloc(&d_grad_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv1_bias_, CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv2_weights_, CONV2_FILTERS * CONV1_FILTERS * 3 * 3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv2_bias_, CONV2_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv3_weights_, LATENT_C * LATENT_C * 3 * 3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv3_bias_, LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv4_weights_, CONV1_FILTERS * LATENT_C * 3 * 3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv4_bias_, CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3 * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv5_bias_, INPUT_C * sizeof(float)));
-    
-    std::cout << "GPU weights initialized" << std::endl;
-}
-
-void AutoencoderGPU::allocate_device_memory(int batch_size) {
-    if (batch_size == current_batch_size_) return;
-    
-    // Free old memory if exists
-    if (current_batch_size_ > 0) {
-        cudaFree(d_input_);
-        cudaFree(d_conv1_out_);
-        cudaFree(d_pool1_out_);
-        cudaFree(d_indices1_);
-        cudaFree(d_conv2_out_);
-        cudaFree(d_pool2_out_);
-        cudaFree(d_indices2_);
-        cudaFree(d_conv3_out_);
-        cudaFree(d_up1_out_);
-        cudaFree(d_conv4_out_);
-        cudaFree(d_up2_out_);
-        cudaFree(d_conv5_out_);
-        
-        cudaFree(d_grad_conv5_out_);
-        cudaFree(d_grad_up2_out_);
-        cudaFree(d_grad_conv4_out_);
-        cudaFree(d_grad_up1_out_);
-        cudaFree(d_grad_conv3_out_);
-        cudaFree(d_grad_pool2_out_);
-        cudaFree(d_grad_conv2_out_);
-        cudaFree(d_grad_pool1_out_);
-        cudaFree(d_grad_conv1_out_);
-    }
-    
-    current_batch_size_ = batch_size;
-    
-    // Allocate activation buffers
-    CUDA_CHECK(cudaMalloc(&d_input_, batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_pool1_out_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_indices1_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_pool2_out_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_indices2_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_up1_out_, batch_size * 16 * 16 * LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_up2_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_conv5_out_, batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float)));
-    
-    // Allocate gradient buffers for activations
-    CUDA_CHECK(cudaMalloc(&d_grad_conv5_out_, batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_up2_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_up1_out_, batch_size * 16 * 16 * LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_pool2_out_, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_pool1_out_, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_grad_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float)));
-}
-
-void AutoencoderGPU::free_device_memory() {
-    if (d_conv1_weights_) cudaFree(d_conv1_weights_);
-    if (d_conv1_bias_) cudaFree(d_conv1_bias_);
-    if (d_conv2_weights_) cudaFree(d_conv2_weights_);
-    if (d_conv2_bias_) cudaFree(d_conv2_bias_);
-    if (d_conv3_weights_) cudaFree(d_conv3_weights_);
-    if (d_conv3_bias_) cudaFree(d_conv3_bias_);
-    if (d_conv4_weights_) cudaFree(d_conv4_weights_);
-    if (d_conv4_bias_) cudaFree(d_conv4_bias_);
-    if (d_conv5_weights_) cudaFree(d_conv5_weights_);
-    if (d_conv5_bias_) cudaFree(d_conv5_bias_);
-    
-    if (d_input_) cudaFree(d_input_);
-    if (d_conv1_out_) cudaFree(d_conv1_out_);
-    if (d_pool1_out_) cudaFree(d_pool1_out_);
-    if (d_indices1_) cudaFree(d_indices1_);
-    if (d_conv2_out_) cudaFree(d_conv2_out_);
-    if (d_pool2_out_) cudaFree(d_pool2_out_);
-    if (d_indices2_) cudaFree(d_indices2_);
-    if (d_conv3_out_) cudaFree(d_conv3_out_);
-    if (d_up1_out_) cudaFree(d_up1_out_);
-    if (d_conv4_out_) cudaFree(d_conv4_out_);
-    if (d_up2_out_) cudaFree(d_up2_out_);
-    if (d_conv5_out_) cudaFree(d_conv5_out_);
-    
-    if (d_grad_conv5_out_) cudaFree(d_grad_conv5_out_);
-    if (d_grad_up2_out_) cudaFree(d_grad_up2_out_);
-    if (d_grad_conv4_out_) cudaFree(d_grad_conv4_out_);
-    if (d_grad_up1_out_) cudaFree(d_grad_up1_out_);
-    if (d_grad_conv3_out_) cudaFree(d_grad_conv3_out_);
-    if (d_grad_pool2_out_) cudaFree(d_grad_pool2_out_);
-    if (d_grad_conv2_out_) cudaFree(d_grad_conv2_out_);
-    if (d_grad_pool1_out_) cudaFree(d_grad_pool1_out_);
-    if (d_grad_conv1_out_) cudaFree(d_grad_conv1_out_);
-    
-    if (d_grad_conv1_weights_) cudaFree(d_grad_conv1_weights_);
-    if (d_grad_conv1_bias_) cudaFree(d_grad_conv1_bias_);
-    if (d_grad_conv2_weights_) cudaFree(d_grad_conv2_weights_);
-    if (d_grad_conv2_bias_) cudaFree(d_grad_conv2_bias_);
-    if (d_grad_conv3_weights_) cudaFree(d_grad_conv3_weights_);
-    if (d_grad_conv3_bias_) cudaFree(d_grad_conv3_bias_);
-    if (d_grad_conv4_weights_) cudaFree(d_grad_conv4_weights_);
-    if (d_grad_conv4_bias_) cudaFree(d_grad_conv4_bias_);
-    if (d_grad_conv5_weights_) cudaFree(d_grad_conv5_weights_);
-    if (d_grad_conv5_bias_) cudaFree(d_grad_conv5_bias_);
-    
-    if (d_loss_) cudaFree(d_loss_);
-}
-
-// Newly added: GPU forward pass for complete encoder-decoder pipeline
-void AutoencoderGPU::forward_gpu(int batch_size) {
-    // Encoder
-    // Conv1 + ReLU: (32, 32, 3) -> (32, 32, 256)
-    launch_conv2d_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
-                         batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
-    launch_relu_forward(d_conv1_out_, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-    
-    // MaxPool: (32, 32, 256) -> (16, 16, 256)
-    launch_maxpool2d_forward(d_conv1_out_, d_pool1_out_, d_indices1_,
-                            batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
-    
-    // Conv2 + ReLU: (16, 16, 256) -> (16, 16, 128)
-    launch_conv2d_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
-                         batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
-    launch_relu_forward(d_conv2_out_, batch_size * 16 * 16 * CONV2_FILTERS);
-    
-    // MaxPool: (16, 16, 128) -> (8, 8, 128) - Latent
-    launch_maxpool2d_forward(d_conv2_out_, d_pool2_out_, d_indices2_,
-                            batch_size, 16, 16, CONV2_FILTERS, 2, 2);
-    
-    // Decoder
-    // Conv3 + ReLU: (8, 8, 128) -> (8, 8, 128)
-    launch_conv2d_forward(d_pool2_out_, d_conv3_out_, d_conv3_weights_, d_conv3_bias_,
-                         batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
-    launch_relu_forward(d_conv3_out_, batch_size * LATENT_H * LATENT_W * LATENT_C);
-    
-    // Upsample: (8, 8, 128) -> (16, 16, 128)
-    launch_upsample2d_forward(d_conv3_out_, d_up1_out_,
-                             batch_size, LATENT_H, LATENT_W, LATENT_C, 2);
-    
-    // Conv4 + ReLU: (16, 16, 128) -> (16, 16, 256)
-    launch_conv2d_forward(d_up1_out_, d_conv4_out_, d_conv4_weights_, d_conv4_bias_,
-                         batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1);
-    launch_relu_forward(d_conv4_out_, batch_size * 16 * 16 * CONV1_FILTERS);
-    
-    // Upsample: (16, 16, 256) -> (32, 32, 256)
-    launch_upsample2d_forward(d_conv4_out_, d_up2_out_,
-                             batch_size, 16, 16, CONV1_FILTERS, 2);
-    
-    // Conv5 (no activation): (32, 32, 256) -> (32, 32, 3)
-    launch_conv2d_forward(d_up2_out_, d_conv5_out_, d_conv5_weights_, d_conv5_bias_,
-                         batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
-}
-
-// Newly added: Compute MSE loss on GPU
-float AutoencoderGPU::compute_loss_gpu(int batch_size) {
-    int size = batch_size * INPUT_H * INPUT_W * INPUT_C;
-    launch_mse_loss(d_input_, d_conv5_out_, d_loss_, size);
-    
-    float h_loss;
-    CUDA_CHECK(cudaMemcpy(&h_loss, d_loss_, sizeof(float), cudaMemcpyDeviceToHost));
-    return h_loss / size;
-}
-
-// Newly added: Complete GPU backward pass implementation
-void AutoencoderGPU::backward_gpu(int batch_size) {
-    int size = batch_size * INPUT_H * INPUT_W * INPUT_C;
-    
-    // FIX: Batch zero gradients with cudaMemsetAsync (faster than multiple kernel calls)
-    cudaMemsetAsync(d_grad_conv1_weights_, 0, CONV1_FILTERS * INPUT_C * 3 * 3 * sizeof(float));
-    cudaMemsetAsync(d_grad_conv1_bias_, 0, CONV1_FILTERS * sizeof(float));
-    cudaMemsetAsync(d_grad_conv2_weights_, 0, CONV2_FILTERS * CONV1_FILTERS * 3 * 3 * sizeof(float));
-    cudaMemsetAsync(d_grad_conv2_bias_, 0, CONV2_FILTERS * sizeof(float));
-    cudaMemsetAsync(d_grad_conv3_weights_, 0, LATENT_C * LATENT_C * 3 * 3 * sizeof(float));
-    cudaMemsetAsync(d_grad_conv3_bias_, 0, LATENT_C * sizeof(float));
-    cudaMemsetAsync(d_grad_conv4_weights_, 0, CONV1_FILTERS * LATENT_C * 3 * 3 * sizeof(float));
-    cudaMemsetAsync(d_grad_conv4_bias_, 0, CONV1_FILTERS * sizeof(float));
-    cudaMemsetAsync(d_grad_conv5_weights_, 0, INPUT_C * CONV1_FILTERS * 3 * 3 * sizeof(float));
-    cudaMemsetAsync(d_grad_conv5_bias_, 0, INPUT_C * sizeof(float));
-    
-    // Zero out activation gradients  
-    cudaMemsetAsync(d_grad_conv5_out_, 0, batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float));
-    cudaMemsetAsync(d_grad_up2_out_, 0, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float));
-    cudaMemsetAsync(d_grad_conv4_out_, 0, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float));
-    cudaMemsetAsync(d_grad_up1_out_, 0, batch_size * 16 * 16 * LATENT_C * sizeof(float));
-    cudaMemsetAsync(d_grad_conv3_out_, 0, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float));
-    cudaMemsetAsync(d_grad_pool2_out_, 0, batch_size * LATENT_H * LATENT_W * LATENT_C * sizeof(float));
-    cudaMemsetAsync(d_grad_conv2_out_, 0, batch_size * 16 * 16 * CONV2_FILTERS * sizeof(float));
-    cudaMemsetAsync(d_grad_pool1_out_, 0, batch_size * 16 * 16 * CONV1_FILTERS * sizeof(float));
-    cudaMemsetAsync(d_grad_conv1_out_, 0, batch_size * INPUT_H * INPUT_W * CONV1_FILTERS * sizeof(float));
-    
-    // Compute gradient of loss w.r.t. output
-    launch_mse_loss_backward(d_conv5_out_, d_input_, d_grad_conv5_out_, size);
-    
-    // Backward through decoder
-    // Conv5 backward: (32, 32, 3) <- (32, 32, 256)
-    launch_conv2d_backward(d_grad_conv5_out_, d_up2_out_, d_conv5_weights_, d_grad_up2_out_,
-                          d_grad_conv5_weights_, d_grad_conv5_bias_,
-                          batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
-    
-    // Upsample2 backward: (16, 16, 256) <- (32, 32, 256)
-    launch_upsample2d_backward(d_grad_up2_out_, d_grad_conv4_out_,
-                              batch_size, 16, 16, CONV1_FILTERS, 2);
+    // Upsample2 backward
+    dim3 blocks_up2(256, 1, 1);
+    dim3 threads_up2(1, 16, 16);
+    upsample_backward_kernel<<<blocks_up2, threads_up2>>>(d_grad_up2, d_grad_relu4, 256, 16, 16);
+    CUDA_CHECK(cudaGetLastError());
     
     // ReLU4 backward
-    launch_relu_backward(d_grad_conv4_out_, d_conv4_out_, d_grad_conv4_out_,
-                        batch_size * 16 * 16 * CONV1_FILTERS);
+    relu_backward_kernel<<<(256*16*16 + 255)/256, 256>>>(d_grad_relu4, d_conv4_out, d_grad_conv4, 256*16*16);
+    CUDA_CHECK(cudaGetLastError());
     
-    // Conv4 backward: (16, 16, 128) <- (16, 16, 256)
-    launch_conv2d_backward(d_grad_conv4_out_, d_up1_out_, d_conv4_weights_, d_grad_up1_out_,
-                          d_grad_conv4_weights_, d_grad_conv4_bias_,
-                          batch_size, 16, 16, LATENT_C, CONV1_FILTERS, 3, 1, 1);
+    // Conv4 backward
+    dim3 blocks4_w(256, 128);
+    conv2d_weight_grad_kernel<<<blocks4_w, 9>>>(d_grad_conv4, d_up1_out, d_conv4_w_grad,
+                                                 128, 16, 16, 256, 16, 16, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
     
-    // Upsample1 backward: (8, 8, 128) <- (16, 16, 128)
-    launch_upsample2d_backward(d_grad_up1_out_, d_grad_conv3_out_,
-                              batch_size, LATENT_H, LATENT_W, LATENT_C, 2);
+    conv2d_bias_grad_kernel<<<1, 256>>>(d_grad_conv4, d_conv4_b_grad, 256, 16, 16);
+    CUDA_CHECK(cudaGetLastError());
+    
+    dim3 blocks4_in(128, 1, 1);
+    conv2d_input_grad_kernel<<<blocks4_in, threads_up2>>>(d_grad_conv4, d_conv4_w, d_grad_up1,
+                                                           128, 16, 16, 256, 16, 16, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // Upsample1 backward
+    dim3 blocks_up1(128, 1, 1);
+    dim3 threads_up1(1, 8, 8);
+    upsample_backward_kernel<<<blocks_up1, threads_up1>>>(d_grad_up1, d_grad_relu3, 128, 8, 8);
+    CUDA_CHECK(cudaGetLastError());
     
     // ReLU3 backward
-    launch_relu_backward(d_grad_conv3_out_, d_conv3_out_, d_grad_conv3_out_,
-                        batch_size * LATENT_H * LATENT_W * LATENT_C);
+    relu_backward_kernel<<<(128*8*8 + 255)/256, 256>>>(d_grad_relu3, d_conv3_out, d_grad_conv3, 128*8*8);
+    CUDA_CHECK(cudaGetLastError());
     
-    // Conv3 backward: (8, 8, 128) <- (8, 8, 128)
-    launch_conv2d_backward(d_grad_conv3_out_, d_pool2_out_, d_conv3_weights_, d_grad_pool2_out_,
-                          d_grad_conv3_weights_, d_grad_conv3_bias_,
-                          batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
+    // Conv3 backward
+    dim3 blocks3_w(128, 128);
+    conv2d_weight_grad_kernel<<<blocks3_w, 9>>>(d_grad_conv3, d_pool2_out, d_conv3_w_grad,
+                                                 128, 8, 8, 128, 8, 8, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
     
-    // Backward through encoder
-    // MaxPool2 backward: (16, 16, 128) <- (8, 8, 128)
-    launch_maxpool2d_backward(d_grad_pool2_out_, d_conv2_out_, d_indices2_, d_pool2_out_,
-                             d_grad_conv2_out_, batch_size, 16, 16, CONV2_FILTERS, 2, 2);
+    conv2d_bias_grad_kernel<<<1, 128>>>(d_grad_conv3, d_conv3_b_grad, 128, 8, 8);
+    CUDA_CHECK(cudaGetLastError());
+    
+    dim3 blocks3_in(128, 1, 1);
+    conv2d_input_grad_kernel<<<blocks3_in, threads_up1>>>(d_grad_conv3, d_conv3_w, d_grad_pool2,
+                                                           128, 8, 8, 128, 8, 8, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // MaxPool2 backward
+    dim3 blocks_pool2(128, 1, 1);
+    maxpool_backward_kernel<<<blocks_pool2, threads_up2>>>(d_grad_pool2, d_relu2_out, d_grad_relu2, 128, 16, 16);
+    CUDA_CHECK(cudaGetLastError());
     
     // ReLU2 backward
-    launch_relu_backward(d_grad_conv2_out_, d_conv2_out_, d_grad_conv2_out_,
-                        batch_size * 16 * 16 * CONV2_FILTERS);
+    relu_backward_kernel<<<(128*16*16 + 255)/256, 256>>>(d_grad_relu2, d_conv2_out, d_grad_conv2, 128*16*16);
+    CUDA_CHECK(cudaGetLastError());
     
-    // Conv2 backward: (16, 16, 256) <- (16, 16, 128)
-    launch_conv2d_backward(d_grad_conv2_out_, d_pool1_out_, d_conv2_weights_, d_grad_pool1_out_,
-                          d_grad_conv2_weights_, d_grad_conv2_bias_,
-                          batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
+    // Conv2 backward
+    dim3 blocks2_w(128, 256);
+    conv2d_weight_grad_kernel<<<blocks2_w, 9>>>(d_grad_conv2, d_pool1_out, d_conv2_w_grad,
+                                                 256, 16, 16, 128, 16, 16, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
     
-    // MaxPool1 backward: (32, 32, 256) <- (16, 16, 256)
-    launch_maxpool2d_backward(d_grad_pool1_out_, d_conv1_out_, d_indices1_, 
-                            d_pool1_out_, d_grad_conv1_out_, 
-                            batch_size, INPUT_H, INPUT_W, CONV1_FILTERS,
-                             2, 2);
+    conv2d_bias_grad_kernel<<<1, 128>>>(d_grad_conv2, d_conv2_b_grad, 128, 16, 16);
+    CUDA_CHECK(cudaGetLastError());
+    
+    dim3 blocks2_in(256, 1, 1);
+    conv2d_input_grad_kernel<<<blocks2_in, threads_up2>>>(d_grad_conv2, d_conv2_w, d_grad_pool1,
+                                                           256, 16, 16, 128, 16, 16, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // MaxPool1 backward
+    dim3 blocks_pool1(256, 2, 2);
+    dim3 threads_pool1(1, 16, 16);
+    maxpool_backward_kernel<<<blocks_pool1, threads_pool1>>>(d_grad_pool1, d_relu1_out, d_grad_relu1, 256, 32, 32);
+    CUDA_CHECK(cudaGetLastError());
     
     // ReLU1 backward
-    launch_relu_backward(d_grad_conv1_out_, d_conv1_out_, d_grad_conv1_out_,
-                        batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
+    relu_backward_kernel<<<(256*32*32 + 255)/256, 256>>>(d_grad_relu1, d_conv1_out, d_grad_conv1, 256*32*32);
+    CUDA_CHECK(cudaGetLastError());
     
-    // Conv1 backward: (32, 32, 3) <- (32, 32, 256)
-    // Note: We don't need gradient w.r.t. input, but we compute it anyway for completeness
-    float* d_grad_input = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_grad_input, size * sizeof(float)));
-    launch_zero_grad(d_grad_input, size);
+    // Conv1 backward
+    dim3 blocks1_w(256, 3);
+    conv2d_weight_grad_kernel<<<blocks1_w, 9>>>(d_grad_conv1, d_input, d_conv1_w_grad,
+                                                 3, 32, 32, 256, 32, 32, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
     
-    launch_conv2d_backward(d_grad_conv1_out_, d_input_, d_conv1_weights_, d_grad_input,
-                          d_grad_conv1_weights_, d_grad_conv1_bias_,
-                          batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
-    
-    cudaFree(d_grad_input);
+    conv2d_bias_grad_kernel<<<1, 256>>>(d_grad_conv1, d_conv1_b_grad, 256, 32, 32);
+    CUDA_CHECK(cudaGetLastError());
 }
 
-// Newly added: Update all weights using SGD on GPU
-void AutoencoderGPU::update_weights_gpu(float learning_rate, int batch_size) {
-    // Update all weights using SGD
-    launch_sgd_update(d_conv1_weights_, d_grad_conv1_weights_, learning_rate,
-                     CONV1_FILTERS * INPUT_C * 3 * 3);
-    launch_sgd_update(d_conv1_bias_, d_grad_conv1_bias_, learning_rate, CONV1_FILTERS);
+void AutoencoderGPU::update_weights(float learning_rate) {
+    int threads = 256;
     
-    launch_sgd_update(d_conv2_weights_, d_grad_conv2_weights_, learning_rate,
-                     CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
-    launch_sgd_update(d_conv2_bias_, d_grad_conv2_bias_, learning_rate, CONV2_FILTERS);
+    sgd_update_kernel<<<(h_conv1_w.size() + threads - 1) / threads, threads>>>(
+        d_conv1_w, d_conv1_w_grad, learning_rate, h_conv1_w.size());
+    sgd_update_kernel<<<(h_conv1_b.size() + threads - 1) / threads, threads>>>(
+        d_conv1_b, d_conv1_b_grad, learning_rate, h_conv1_b.size());
     
-    launch_sgd_update(d_conv3_weights_, d_grad_conv3_weights_, learning_rate,
-                     LATENT_C * LATENT_C * 3 * 3);
-    launch_sgd_update(d_conv3_bias_, d_grad_conv3_bias_, learning_rate, LATENT_C);
+    sgd_update_kernel<<<(h_conv2_w.size() + threads - 1) / threads, threads>>>(
+        d_conv2_w, d_conv2_w_grad, learning_rate, h_conv2_w.size());
+    sgd_update_kernel<<<(h_conv2_b.size() + threads - 1) / threads, threads>>>(
+        d_conv2_b, d_conv2_b_grad, learning_rate, h_conv2_b.size());
     
-    launch_sgd_update(d_conv4_weights_, d_grad_conv4_weights_, learning_rate,
-                     CONV1_FILTERS * LATENT_C * 3 * 3);
-    launch_sgd_update(d_conv4_bias_, d_grad_conv4_bias_, learning_rate, CONV1_FILTERS);
+    sgd_update_kernel<<<(h_conv3_w.size() + threads - 1) / threads, threads>>>(
+        d_conv3_w, d_conv3_w_grad, learning_rate, h_conv3_w.size());
+    sgd_update_kernel<<<(h_conv3_b.size() + threads - 1) / threads, threads>>>(
+        d_conv3_b, d_conv3_b_grad, learning_rate, h_conv3_b.size());
     
-    launch_sgd_update(d_conv5_weights_, d_grad_conv5_weights_, learning_rate,
-                     INPUT_C * CONV1_FILTERS * 3 * 3);
-    launch_sgd_update(d_conv5_bias_, d_grad_conv5_bias_, learning_rate, INPUT_C);
+    sgd_update_kernel<<<(h_conv4_w.size() + threads - 1) / threads, threads>>>(
+        d_conv4_w, d_conv4_w_grad, learning_rate, h_conv4_w.size());
+    sgd_update_kernel<<<(h_conv4_b.size() + threads - 1) / threads, threads>>>(
+        d_conv4_b, d_conv4_b_grad, learning_rate, h_conv4_b.size());
+    
+    sgd_update_kernel<<<(h_conv5_w.size() + threads - 1) / threads, threads>>>(
+        d_conv5_w, d_conv5_w_grad, learning_rate, h_conv5_w.size());
+    sgd_update_kernel<<<(h_conv5_b.size() + threads - 1) / threads, threads>>>(
+        d_conv5_b, d_conv5_b_grad, learning_rate, h_conv5_b.size());
+    
+    CUDA_CHECK(cudaGetLastError());
 }
 
-// Newly added: Complete GPU training loop with backward pass
-void AutoencoderGPU::train(const std::vector<float>& train_images,
-                            int num_images,
-                            int batch_size,
-                            int epochs,
-                            float learning_rate) {
-    std::cout << "\n" << std::string(60, '=') << std::endl;
-    std::cout << "         TRAINING CONFIGURATION" << std::endl;
-    std::cout << std::string(60, '=') << std::endl;
-    std::cout << "  Total Images    : " << num_images << std::endl;
-    std::cout << "  Batch Size      : " << batch_size << std::endl;
-    std::cout << "  Epochs          : " << epochs << std::endl;
-    std::cout << "  Learning Rate   : " << learning_rate << std::endl;
+bool AutoencoderGPU::save_weights(const std::string& filepath) const {
+    // Copy weights from device to host
+    CUDA_CHECK(cudaMemcpy(h_conv1_w.data(), d_conv1_w, h_conv1_w.size() * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_conv1_b.data(), d_conv1_b, h_conv1_b.size() * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_conv2_w.data(), d_conv2_w, h_conv2_w.size() * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_conv2_b.data(), d_conv2_b, h_conv2_b.size() * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_conv3_w.data(), d_conv3_w, h_conv3_w.size() * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_conv3_b.data(), d_conv3_b, h_conv3_b.size() * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_conv4_w.data(), d_conv4_w, h_conv4_w.size() * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_conv4_b.data(), d_conv4_b, h_conv4_b.size() * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_conv5_w.data(), d_conv5_w, h_conv5_w.size() * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(h_conv5_b.data(), d_conv5_b, h_conv5_b.size() * sizeof(float), cudaMemcpyDeviceToHost));
     
-    // FIX: Allocate for max batch size once to avoid reallocation
-    allocate_device_memory(batch_size);
-    
-    int num_batches = (num_images + batch_size - 1) / batch_size;
-    std::cout << "  Batches/Epoch   : " << num_batches << std::endl;
-    std::cout << "  Total Batches   : " << (num_batches * epochs) << std::endl;
-    std::cout << std::string(60, '=') << std::endl;
-    
-    // Create CUDA events for timing
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    
-    cudaEventRecord(start);
-    
-    std::cout << "\nStarting training...\n" << std::endl;
-    
-    for (int epoch = 0; epoch < epochs; ++epoch) {
-        cudaEvent_t epoch_start, epoch_stop;
-        cudaEventCreate(&epoch_start);
-        cudaEventCreate(&epoch_stop);
-        cudaEventRecord(epoch_start);
-        
-        float epoch_loss = 0.0f;
-        // For large datasets, log every batch; for small datasets, log ~10 times per epoch
-        int log_interval = (num_batches > 100) ? 1 : std::max(1, num_batches / 10);
-        
-        std::cout << "Epoch [" << (epoch + 1) << "/" << epochs << "]" << std::endl;
-        
-        for (int batch = 0; batch < num_batches; ++batch) {
-            cudaEvent_t batch_start, batch_stop;
-            cudaEventCreate(&batch_start);
-            cudaEventCreate(&batch_stop);
-            cudaEventRecord(batch_start);
-            
-            int start_idx = batch * batch_size;
-            int end_idx = std::min(start_idx + batch_size, num_images);
-            int actual_batch_size = end_idx - start_idx;
-            
-            // FIX: No reallocation - use actual_batch_size in kernels only
-            
-            const float* batch_data = &train_images[start_idx * INPUT_H * INPUT_W * INPUT_C];
-            
-            // Copy input to device
-            CUDA_CHECK(cudaMemcpy(d_input_, batch_data,
-                                 actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
-                                 cudaMemcpyHostToDevice));
-            
-            // Forward pass
-            forward_gpu(actual_batch_size);
-            
-            // Compute loss
-            float loss = compute_loss_gpu(actual_batch_size);
-            epoch_loss += loss;
-            
-            // Backward pass
-            backward_gpu(actual_batch_size);
-            
-            // Update weights
-            update_weights_gpu(learning_rate, actual_batch_size);
-            
-            cudaEventRecord(batch_stop);
-            cudaEventSynchronize(batch_stop);
-            
-            float batch_time;
-            cudaEventElapsedTime(&batch_time, batch_start, batch_stop);
-            
-            // Log progress every N batches (host-side, no GPU sync needed)
-            if ((batch + 1) % log_interval == 0 || batch == num_batches - 1) {
-                float avg_loss = epoch_loss / (batch + 1);
-                float progress = 100.0f * (batch + 1) / num_batches;
-                std::cout << "  Batch [" << (batch + 1) << "/" << num_batches << "] "
-                          << "Avg Loss: " << std::setprecision(6) << avg_loss 
-                          << " - Time: " << (batch_time / 1000.0f) << "s" << std::endl;
-            }
-            
-            cudaEventDestroy(batch_start);
-            cudaEventDestroy(batch_stop);
-        }
-        
-        cudaEventRecord(epoch_stop);
-        cudaEventSynchronize(epoch_stop);
-        
-        float epoch_time;
-        cudaEventElapsedTime(&epoch_time, epoch_start, epoch_stop);
-        epoch_time /= 1000.0f;  // Convert to seconds
-        
-        float avg_epoch_loss = epoch_loss / num_batches;
-        float imgs_per_sec = num_images / epoch_time;
-        
-        // Calculate ETA
-        float elapsed_epochs = epoch + 1;
-        float avg_time_per_epoch = epoch_time;  // Current epoch time
-        float remaining_epochs = epochs - elapsed_epochs;
-        float eta_seconds = remaining_epochs * avg_time_per_epoch;
-        int eta_minutes = (int)(eta_seconds / 60);
-        int eta_secs = (int)eta_seconds % 60;
-        
-        cudaEventDestroy(epoch_start);
-        cudaEventDestroy(epoch_stop);
-    }
-    
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-    
-    float total_time;
-    cudaEventElapsedTime(&total_time, start, stop);
-    total_time /= 1000.0f;  // Convert to seconds
-    
-    int total_minutes = (int)(total_time / 60);
-    int total_secs = (int)total_time % 60;
-    float avg_epoch_time = total_time / epochs;
-    float total_images_processed = (float)num_images * epochs;
-    float overall_throughput = total_images_processed / total_time;
-    
-    std::cout << "\n" << std::string(60, '=') << std::endl;
-    std::cout << "         TRAINING COMPLETED" << std::endl;
-    std::cout << std::string(60, '=') << std::endl;
-    std::cout << "  Total Time         : " << total_minutes << "m " << total_secs << "s (" 
-              << std::fixed << std::setprecision(2) << total_time << "s)" << std::endl;
-    std::cout << "  Avg Time/Epoch     : " << avg_epoch_time << "s" << std::endl;
-    std::cout << "  Overall Throughput : " << std::setprecision(1) << overall_throughput << " images/sec" << std::endl;
-    std::cout << "  Total Images       : " << (int)total_images_processed << " (" 
-              << num_images << " × " << epochs << " epochs)" << std::endl;
-    std::cout << std::string(60, '=') << "\n" << std::endl;
-    
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-}
-
-void AutoencoderGPU::extract_features(const std::vector<float>& images,
-                                       int num_images,
-                                       std::vector<float>& features) {
-    features.resize(num_images * LATENT_DIM);
-    
-    int batch_size = 64;
-    int num_batches = (num_images + batch_size - 1) / batch_size;
-    
-    auto start = std::chrono::high_resolution_clock::now();
-    
-    for (int batch = 0; batch < num_batches; ++batch) {
-        int start_idx = batch * batch_size;
-        int end_idx = std::min(start_idx + batch_size, num_images);
-        int actual_batch_size = end_idx - start_idx;
-        
-        if (actual_batch_size != current_batch_size_) {
-            allocate_device_memory(actual_batch_size);
-        }
-        
-        const float* batch_data = &images[start_idx * INPUT_H * INPUT_W * INPUT_C];
-        
-        // Copy input to device
-        CUDA_CHECK(cudaMemcpy(d_input_, batch_data,
-                             actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
-                             cudaMemcpyHostToDevice));
-        
-        // Run encoder only
-        launch_conv2d_forward(d_input_, d_conv1_out_, d_conv1_weights_, d_conv1_bias_,
-                             actual_batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
-        launch_relu_forward(d_conv1_out_, actual_batch_size * INPUT_H * INPUT_W * CONV1_FILTERS);
-        
-        launch_maxpool2d_forward(d_conv1_out_, d_pool1_out_, d_indices1_,
-                                actual_batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, 2, 2);
-        
-        launch_conv2d_forward(d_pool1_out_, d_conv2_out_, d_conv2_weights_, d_conv2_bias_,
-                             actual_batch_size, 16, 16, CONV1_FILTERS, CONV2_FILTERS, 3, 1, 1);
-        launch_relu_forward(d_conv2_out_, actual_batch_size * 16 * 16 * CONV2_FILTERS);
-        
-        launch_maxpool2d_forward(d_conv2_out_, d_pool2_out_, d_indices2_,
-                                actual_batch_size, 16, 16, CONV2_FILTERS, 2, 2);
-        
-        // Copy latent features back to host
-        CUDA_CHECK(cudaMemcpy(&features[start_idx * LATENT_DIM],
-                             d_pool2_out_,
-                             actual_batch_size * LATENT_DIM * sizeof(float),
-                             cudaMemcpyDeviceToHost));
-    }
-    
-    auto end = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float>(end - start).count();
-    
-    std::cout << "Feature extraction completed in " << time << " seconds" << std::endl;
-}
-
-void AutoencoderGPU::infer(const std::vector<float>& images,
-                            int num_images,
-                            std::vector<float>& reconstructions) {
-    reconstructions.resize(num_images * INPUT_H * INPUT_W * INPUT_C);
-    
-    int batch_size = 64;
-    int num_batches = (num_images + batch_size - 1) / batch_size;
-    
-    auto start = std::chrono::high_resolution_clock::now();
-    
-    for (int batch = 0; batch < num_batches; ++batch) {
-        int start_idx = batch * batch_size;
-        int end_idx = std::min(start_idx + batch_size, num_images);
-        int actual_batch_size = end_idx - start_idx;
-        
-        if (actual_batch_size != current_batch_size_) {
-            allocate_device_memory(actual_batch_size);
-        }
-        
-        const float* batch_data = &images[start_idx * INPUT_H * INPUT_W * INPUT_C];
-        
-        // Copy input to device
-        CUDA_CHECK(cudaMemcpy(d_input_, batch_data,
-                             actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
-                             cudaMemcpyHostToDevice));
-        
-        // Run full forward pass (encoder + decoder)
-        forward_gpu(actual_batch_size);
-        
-        // Copy reconstructed output back to host
-        CUDA_CHECK(cudaMemcpy(&reconstructions[start_idx * INPUT_H * INPUT_W * INPUT_C],
-                             d_conv5_out_,
-                             actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
-                             cudaMemcpyDeviceToHost));
-    }
-    
-    auto end = std::chrono::high_resolution_clock::now();
-    float time = std::chrono::duration<float>(end - start).count();
-    
-    std::cout << "Inference completed on " << num_images << " images in " << time << " seconds" << std::endl;
-}
-
-void AutoencoderGPU::save_weights(const std::string& filepath) {
     std::ofstream file(filepath, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "Failed to open file for saving: " << filepath << std::endl;
-        return;
-    }
+    if (!file.is_open()) return false;
     
-    auto save_tensor = [&](float* d_ptr, int size) {
-        std::vector<float> h_data(size);
-        CUDA_CHECK(cudaMemcpy(h_data.data(), d_ptr, size * sizeof(float), cudaMemcpyDeviceToHost));
-        file.write(reinterpret_cast<const char*>(&size), sizeof(int));
-        file.write(reinterpret_cast<const char*>(h_data.data()), size * sizeof(float));
-    };
-    
-    save_tensor(d_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3);
-    save_tensor(d_conv1_bias_, CONV1_FILTERS);
-    save_tensor(d_conv2_weights_, CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
-    save_tensor(d_conv2_bias_, CONV2_FILTERS);
-    save_tensor(d_conv3_weights_, LATENT_C * LATENT_C * 3 * 3);
-    save_tensor(d_conv3_bias_, LATENT_C);
-    save_tensor(d_conv4_weights_, CONV1_FILTERS * LATENT_C * 3 * 3);
-    save_tensor(d_conv4_bias_, CONV1_FILTERS);
-    save_tensor(d_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3);
-    save_tensor(d_conv5_bias_, INPUT_C);
+    file.write((const char*)h_conv1_w.data(), h_conv1_w.size() * sizeof(float));
+    file.write((const char*)h_conv1_b.data(), h_conv1_b.size() * sizeof(float));
+    file.write((const char*)h_conv2_w.data(), h_conv2_w.size() * sizeof(float));
+    file.write((const char*)h_conv2_b.data(), h_conv2_b.size() * sizeof(float));
+    file.write((const char*)h_conv3_w.data(), h_conv3_w.size() * sizeof(float));
+    file.write((const char*)h_conv3_b.data(), h_conv3_b.size() * sizeof(float));
+    file.write((const char*)h_conv4_w.data(), h_conv4_w.size() * sizeof(float));
+    file.write((const char*)h_conv4_b.data(), h_conv4_b.size() * sizeof(float));
+    file.write((const char*)h_conv5_w.data(), h_conv5_w.size() * sizeof(float));
+    file.write((const char*)h_conv5_b.data(), h_conv5_b.size() * sizeof(float));
     
     file.close();
-    std::cout << "Weights saved to " << filepath << std::endl;
+    return true;
 }
 
-void AutoencoderGPU::load_weights(const std::string& filepath) {
+bool AutoencoderGPU::load_weights(const std::string& filepath) {
     std::ifstream file(filepath, std::ios::binary);
     if (!file.is_open()) {
-        std::cerr << "Failed to open file for loading: " << filepath << std::endl;
-        return;
+        std::cerr << "Failed to open weights file: " << filepath << std::endl;
+        return false;
     }
-    
-    auto load_tensor = [&](float* d_ptr, int expected_size) {
-        int size;
-        file.read(reinterpret_cast<char*>(&size), sizeof(int));
-        if (size != expected_size) {
-            std::cerr << "Size mismatch: expected " << expected_size << ", got " << size << std::endl;
-            return;
-        }
-        std::vector<float> h_data(size);
-        file.read(reinterpret_cast<char*>(h_data.data()), size * sizeof(float));
-        CUDA_CHECK(cudaMemcpy(d_ptr, h_data.data(), size * sizeof(float), cudaMemcpyHostToDevice));
+
+    auto read_or_fail = [&](float* ptr, size_t n) -> bool {
+        file.read(reinterpret_cast<char*>(ptr), n * sizeof(float));
+        return file.good();
     };
-    
-    load_tensor(d_conv1_weights_, CONV1_FILTERS * INPUT_C * 3 * 3);
-    load_tensor(d_conv1_bias_, CONV1_FILTERS);
-    load_tensor(d_conv2_weights_, CONV2_FILTERS * CONV1_FILTERS * 3 * 3);
-    load_tensor(d_conv2_bias_, CONV2_FILTERS);
-    load_tensor(d_conv3_weights_, LATENT_C * LATENT_C * 3 * 3);
-    load_tensor(d_conv3_bias_, LATENT_C);
-    load_tensor(d_conv4_weights_, CONV1_FILTERS * LATENT_C * 3 * 3);
-    load_tensor(d_conv4_bias_, CONV1_FILTERS);
-    load_tensor(d_conv5_weights_, INPUT_C * CONV1_FILTERS * 3 * 3);
-    load_tensor(d_conv5_bias_, INPUT_C);
-    
-    file.close();
-    std::cout << "Weights loaded from " << filepath << std::endl;
+
+    // Ensure host buffers have correct sizes
+    if (h_conv1_w.size() != 256 * 3 * 3 * 3)  h_conv1_w.resize(256 * 3 * 3 * 3);
+    if (h_conv1_b.size() != 256)              h_conv1_b.resize(256);
+    if (h_conv2_w.size() != 128 * 256 * 3 * 3) h_conv2_w.resize(128 * 256 * 3 * 3);
+    if (h_conv2_b.size() != 128)               h_conv2_b.resize(128);
+    if (h_conv3_w.size() != 128 * 128 * 3 * 3) h_conv3_w.resize(128 * 128 * 3 * 3);
+    if (h_conv3_b.size() != 128)               h_conv3_b.resize(128);
+    if (h_conv4_w.size() != 256 * 128 * 3 * 3) h_conv4_w.resize(256 * 128 * 3 * 3);
+    if (h_conv4_b.size() != 256)               h_conv4_b.resize(256);
+    if (h_conv5_w.size() != 3 * 256 * 3 * 3)   h_conv5_w.resize(3 * 256 * 3 * 3);
+    if (h_conv5_b.size() != 3)                 h_conv5_b.resize(3);
+
+    // Read in EXACT order matching save_weights()
+    if (!read_or_fail(h_conv1_w.data(), h_conv1_w.size())) return false;
+    if (!read_or_fail(h_conv1_b.data(), h_conv1_b.size())) return false;
+    if (!read_or_fail(h_conv2_w.data(), h_conv2_w.size())) return false;
+    if (!read_or_fail(h_conv2_b.data(), h_conv2_b.size())) return false;
+    if (!read_or_fail(h_conv3_w.data(), h_conv3_w.size())) return false;
+    if (!read_or_fail(h_conv3_b.data(), h_conv3_b.size())) return false;
+    if (!read_or_fail(h_conv4_w.data(), h_conv4_w.size())) return false;
+    if (!read_or_fail(h_conv4_b.data(), h_conv4_b.size())) return false;
+    if (!read_or_fail(h_conv5_w.data(), h_conv5_w.size())) return false;
+    if (!read_or_fail(h_conv5_b.data(), h_conv5_b.size())) return false;
+
+    // Copy host -> device
+    CUDA_CHECK(cudaMemcpy(d_conv1_w, h_conv1_w.data(), h_conv1_w.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv1_b, h_conv1_b.data(), h_conv1_b.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv2_w, h_conv2_w.data(), h_conv2_w.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv2_b, h_conv2_b.data(), h_conv2_b.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv3_w, h_conv3_w.data(), h_conv3_w.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv3_b, h_conv3_b.data(), h_conv3_b.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv4_w, h_conv4_w.data(), h_conv4_w.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv4_b, h_conv4_b.data(), h_conv4_b.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv5_w, h_conv5_w.data(), h_conv5_w.size() * sizeof(float), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_conv5_b, h_conv5_b.data(), h_conv5_b.size() * sizeof(float), cudaMemcpyHostToDevice));
+
+    std::cout << "Loaded weights from: " << filepath << std::endl;
+    return true;
 }
 
-void AutoencoderGPU::copy_weights_from_cpu(const std::string& cpu_weights_path) {
-    load_weights(cpu_weights_path);
+float AutoencoderGPU::get_loss() const { 
+    return last_loss; 
 }
 
+void AutoencoderGPU::extract_features(const float* input_chw, float* output_features) {
+    // Copy input to device
+    CUDA_CHECK(cudaMemcpy(d_input, input_chw, 3*32*32*sizeof(float), cudaMemcpyHostToDevice));
+
+    dim3 threads(1, 16, 16);
+    
+    // Run encoder only (stop at bottleneck)
+    
+    // Conv1: (3, 32, 32) -> (256, 32, 32)
+    dim3 blocks1(256, 2, 2);
+    conv2d_kernel<<<blocks1, threads>>>(d_input, d_conv1_w, d_conv1_b, d_conv1_out,
+                                        3, 32, 32, 256, 32, 32, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // ReLU1
+    relu_kernel<<<(256*32*32 + 255)/256, 256>>>(d_conv1_out, d_relu1_out, 256*32*32);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // MaxPool1: (256, 32, 32) -> (256, 16, 16)
+    dim3 blocks_pool1(256, 1, 1);
+    dim3 threads_pool1(1, 16, 16);
+    maxpool_kernel<<<blocks_pool1, threads_pool1>>>(d_relu1_out, d_pool1_out, 256, 32, 32);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // Conv2: (256, 16, 16) -> (128, 16, 16)
+    dim3 blocks2(128, 1, 1);
+    conv2d_kernel<<<blocks2, threads>>>(d_pool1_out, d_conv2_w, d_conv2_b, d_conv2_out,
+                                        256, 16, 16, 128, 16, 16, 3, 1);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // ReLU2
+    relu_kernel<<<(128*16*16 + 255)/256, 256>>>(d_conv2_out, d_relu2_out, 128*16*16);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // MaxPool2: (128, 16, 16) -> (128, 8, 8) - BOTTLENECK/FEATURES
+    dim3 blocks_pool2(128, 1, 1);
+    dim3 threads_pool2(1, 8, 8);
+    maxpool_kernel<<<blocks_pool2, threads_pool2>>>(d_relu2_out, d_pool2_out, 128, 16, 16);
+    CUDA_CHECK(cudaGetLastError());
+    
+    CUDA_CHECK(cudaDeviceSynchronize());
+    
+    // Copy features from device to host
+    // d_pool2_out contains 128*8*8 = 8192 features
+    CUDA_CHECK(cudaMemcpy(output_features, d_pool2_out, 128*8*8*sizeof(float), cudaMemcpyDeviceToHost));
+}

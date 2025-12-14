@@ -9,32 +9,21 @@ public:
     AutoencoderGPU();
     ~AutoencoderGPU();
 
-    // Training
-    void train(const std::vector<float>& train_images, 
-               int num_images,
-               int batch_size, 
-               int epochs, 
-               float learning_rate);
-    
-    // Feature extraction (encoder only)
-    void extract_features(const std::vector<float>& images,
-                         int num_images,
-                         std::vector<float>& features);
-    
-    // Inference (full forward pass: encoder + decoder)
-    void infer(const std::vector<float>& images,
-               int num_images,
-               std::vector<float>& reconstructions);
+    // Train one step - input_chw: float[3072] in CHW format, normalized [0,1]
+    float train_step(const float* input_chw, float learning_rate);
     
     // Save/Load weights
-    void save_weights(const std::string& filepath);
-    void load_weights(const std::string& filepath);
+    bool save_weights(const std::string& filepath) const;
+    bool load_weights(const std::string& filepath);
     
-    // Copy weights from CPU version
-    void copy_weights_from_cpu(const std::string& cpu_weights_path);
+    // Get last loss
+    float get_loss() const;
+    
+    // Extract features from encoder (bottleneck: 128*8*8 = 8192 features)
+    void extract_features(const float* input_chw, float* output_features);
 
 private:
-    // Network architecture parameters (same as CPU)
+    // Network architecture parameters
     static constexpr int INPUT_H = 32;
     static constexpr int INPUT_W = 32;
     static constexpr int INPUT_C = 3;
@@ -46,67 +35,47 @@ private:
     static constexpr int LATENT_C = 128;
     static constexpr int LATENT_DIM = LATENT_H * LATENT_W * LATENT_C;
     
-    // Device pointers for weights
-    float* d_conv1_weights_;
-    float* d_conv1_bias_;
-    float* d_conv2_weights_;
-    float* d_conv2_bias_;
-    float* d_conv3_weights_;
-    float* d_conv3_bias_;
-    float* d_conv4_weights_;
-    float* d_conv4_bias_;
-    float* d_conv5_weights_;
-    float* d_conv5_bias_;
+    // Host weight storage (mutable for save_weights const method)
+    mutable std::vector<float> h_conv1_w, h_conv1_b;
+    mutable std::vector<float> h_conv2_w, h_conv2_b;
+    mutable std::vector<float> h_conv3_w, h_conv3_b;
+    mutable std::vector<float> h_conv4_w, h_conv4_b;
+    mutable std::vector<float> h_conv5_w, h_conv5_b;
     
-    // Device pointers for activations
-    float* d_input_;
-    float* d_conv1_out_;
-    float* d_pool1_out_;
-    float* d_indices1_;
-    float* d_conv2_out_;
-    float* d_pool2_out_;
-    float* d_indices2_;
-    float* d_conv3_out_;
-    float* d_up1_out_;
-    float* d_conv4_out_;
-    float* d_up2_out_;
-    float* d_conv5_out_;
+    // Device weight pointers
+    float *d_conv1_w, *d_conv1_b;
+    float *d_conv2_w, *d_conv2_b;
+    float *d_conv3_w, *d_conv3_b;
+    float *d_conv4_w, *d_conv4_b;
+    float *d_conv5_w, *d_conv5_b;
     
-    // Device pointers for gradients
-    float* d_grad_conv5_out_;
-    float* d_grad_up2_out_;
-    float* d_grad_conv4_out_;
-    float* d_grad_up1_out_;
-    float* d_grad_conv3_out_;
-    float* d_grad_pool2_out_;
-    float* d_grad_conv2_out_;
-    float* d_grad_pool1_out_;
-    float* d_grad_conv1_out_;
+    // Device gradient pointers
+    float *d_conv1_w_grad, *d_conv1_b_grad;
+    float *d_conv2_w_grad, *d_conv2_b_grad;
+    float *d_conv3_w_grad, *d_conv3_b_grad;
+    float *d_conv4_w_grad, *d_conv4_b_grad;
+    float *d_conv5_w_grad, *d_conv5_b_grad;
     
-    float* d_grad_conv1_weights_;
-    float* d_grad_conv1_bias_;
-    float* d_grad_conv2_weights_;
-    float* d_grad_conv2_bias_;
-    float* d_grad_conv3_weights_;
-    float* d_grad_conv3_bias_;
-    float* d_grad_conv4_weights_;
-    float* d_grad_conv4_bias_;
-    float* d_grad_conv5_weights_;
-    float* d_grad_conv5_bias_;
+    // Device activation buffers
+    float *d_input;
+    float *d_conv1_out, *d_relu1_out, *d_pool1_out;
+    float *d_conv2_out, *d_relu2_out, *d_pool2_out;
+    float *d_conv3_out, *d_relu3_out, *d_up1_out;
+    float *d_conv4_out, *d_relu4_out, *d_up2_out;
+    float *d_conv5_out;
     
-    float* d_loss_;  // For computing loss on device
+    // Device gradient buffers
+    float *d_grad_conv5, *d_grad_up2, *d_grad_relu4, *d_grad_conv4;
+    float *d_grad_up1, *d_grad_relu3, *d_grad_conv3;
+    float *d_grad_pool2, *d_grad_relu2, *d_grad_conv2;
+    float *d_grad_pool1, *d_grad_relu1, *d_grad_conv1;
     
-    int current_batch_size_;
+    float *d_loss;
+    float last_loss;
     
-    void initialize_weights();
-    void allocate_device_memory(int batch_size);
-    void free_device_memory();
-    
-    void forward_gpu(int batch_size);
-    void backward_gpu(int batch_size);
-    void update_weights_gpu(float learning_rate, int batch_size);
-    
-    float compute_loss_gpu(int batch_size);
+    void forward();
+    void backward();
+    void update_weights(float learning_rate);
 };
 
 #endif // AUTOENCODER_GPU_H
