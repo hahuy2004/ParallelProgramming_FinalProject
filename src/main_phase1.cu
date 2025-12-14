@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
     std::cout << "Images processed: " << num_train_images << std::endl;
     
     // Save weights
-    std::string weights_path = "weights/autoencoder_cpu.weights";
+    std::string weights_path = "weights/autoencoder_cpu.bin";
     autoencoder.save_weights(weights_path);
     
     std::cout << "\n=== Phase 1 Completed ===" << std::endl;

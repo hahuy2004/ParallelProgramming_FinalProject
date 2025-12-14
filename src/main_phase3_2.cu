@@ -16,9 +16,9 @@ int main(int argc, char** argv) {
     
     // GPU OPTIMIZED PHASE: Full training với 50000 ảnh, 20 epochs
     int batch_size = 64;  
-    int epochs = 7;  // Change to 20 for full training
+    int epochs = 5;  // Change to 20 for full training
     float learning_rate = 0.001f;
-    // int num_train_images = 1000; // Change to 50000 for full training
+    int num_train_images = 50000; // Change to 50000 for full training
     
     // Load CIFAR-10 dataset
     std::cout << "\n=== Loading CIFAR-10 Dataset ===" << std::endl;
@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
     auto train_start_2 = std::chrono::high_resolution_clock::now();
     
     autoencoder_ver_2.train(train_images,
-                     loader.get_train_size(),
+                     num_train_images,
                      batch_size,
                      epochs,
                      learning_rate);
@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
     std::cout << "Time per epoch version 2: " << (train_time_2 / epochs) << " seconds" << std::endl;
 
     // Save weights
-    std::string weights_path_2 = "weights/autoencoder_gpu_optimized_2.weights";
+    std::string weights_path_2 = "weights/autoencoder_gpu_optimized_2.bin";
     autoencoder_ver_2.save_weights(weights_path_2);
     
     std::cout << "\n=== Phase 3.2 Completed ===" << std::endl;
