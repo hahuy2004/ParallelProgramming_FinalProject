@@ -8,18 +8,21 @@ int main(int argc, char** argv) {
     std::cout << "PHASE 2: Naive GPU Implementation" << std::endl;
     std::cout << "========================================" << std::endl;
     
-    // Configuration
+    // ==================== CONFIGURATION ==================== //
+    // GPU PHASE: Full training với 50000 ảnh, 20 epochs
+    int batch_size = 64;  
+    int epochs = 5;  // Change to 20 for full training
+    float learning_rate = 0.001f;
+    int num_train_images = 50000; // Change to 50000 for full training
     std::string data_dir = "cifar-10-batches-bin";
     if (argc > 1) {
         data_dir = argv[1];
     }
-    
-    // GPU PHASE: Full training với 50000 ảnh, 20 epochs
-    int batch_size = 32;  
-    int epochs = 4;  // Change to 20 for full training
-    float learning_rate = 0.001f;
-    int num_train_images = 128; // Change to 50000 for full training
-    
+    //=====================================================//
+
+
+
+    // ===================== Load Dataset ==================== //
     // Load CIFAR-10 dataset
     std::cout << "\n=== Loading CIFAR-10 Dataset ===" << std::endl;
     Cifar10Loader loader(data_dir);
@@ -27,23 +30,24 @@ int main(int argc, char** argv) {
         std::cerr << "Failed to load dataset!" << std::endl;
         return 1;
     }
-    
+
     const auto& train_images = loader.get_train_images();
     
     std::cout << "\nDataset loaded successfully!" << std::endl;
     std::cout << "Training images: " << loader.get_train_size() << std::endl;
     std::cout << "Test images: " << loader.get_test_size() << std::endl;
     
-    // Create and train GPU autoencoder
-    std::cout << "\n=== Training GPU Autoencoder (Naive) ===" << std::endl;
-    std::cout << "NOTE: GPU Phase - Training with " << loader.get_train_size() 
-              << " images over " << epochs << " epochs" << std::endl;
-    std::cout << "Expected time: ~" << (loader.get_train_size() * epochs / 1024 * 77.5 / 60) 
-              << " minutes (estimated from test runs)" << std::endl;
+    //=====================================================//
+
+
+
+    //==================== TRAINING ====================//
+    std::cout << "\n========== Training GPU Autoencoder (Naive) =========" << std::endl;
+
     AutoencoderGPU autoencoder;
     
     auto train_start = std::chrono::high_resolution_clock::now();
-    
+
     autoencoder.train(train_images,
                      num_train_images,
                      batch_size,
@@ -64,3 +68,4 @@ int main(int argc, char** argv) {
     
     return 0;
 }
+

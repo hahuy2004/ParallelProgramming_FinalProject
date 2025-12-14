@@ -600,6 +600,48 @@ void AutoencoderGPU::extract_features(const std::vector<float>& images,
     std::cout << "Feature extraction completed in " << time << " seconds" << std::endl;
 }
 
+void AutoencoderGPU::infer(const std::vector<float>& images,
+                            int num_images,
+                            std::vector<float>& reconstructions) {
+    reconstructions.resize(num_images * INPUT_H * INPUT_W * INPUT_C);
+    
+    int batch_size = 64;
+    int num_batches = (num_images + batch_size - 1) / batch_size;
+    
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    for (int batch = 0; batch < num_batches; ++batch) {
+        int start_idx = batch * batch_size;
+        int end_idx = std::min(start_idx + batch_size, num_images);
+        int actual_batch_size = end_idx - start_idx;
+        
+        if (actual_batch_size != current_batch_size_) {
+            allocate_device_memory(actual_batch_size);
+        }
+        
+        const float* batch_data = &images[start_idx * INPUT_H * INPUT_W * INPUT_C];
+        
+        // Copy input to device
+        CUDA_CHECK(cudaMemcpy(d_input_, batch_data,
+                             actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
+                             cudaMemcpyHostToDevice));
+        
+        // Run full forward pass (encoder + decoder)
+        forward_gpu(actual_batch_size);
+        
+        // Copy reconstructed output back to host
+        CUDA_CHECK(cudaMemcpy(&reconstructions[start_idx * INPUT_H * INPUT_W * INPUT_C],
+                             d_conv5_out_,
+                             actual_batch_size * INPUT_H * INPUT_W * INPUT_C * sizeof(float),
+                             cudaMemcpyDeviceToHost));
+    }
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    float time = std::chrono::duration<float>(end - start).count();
+    
+    std::cout << "Inference completed on " << num_images << " images in " << time << " seconds" << std::endl;
+}
+
 void AutoencoderGPU::save_weights(const std::string& filepath) {
     std::ofstream file(filepath, std::ios::binary);
     if (!file.is_open()) {
@@ -666,3 +708,4 @@ void AutoencoderGPU::load_weights(const std::string& filepath) {
 void AutoencoderGPU::copy_weights_from_cpu(const std::string& cpu_weights_path) {
     load_weights(cpu_weights_path);
 }
+

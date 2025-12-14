@@ -107,8 +107,10 @@ __global__ void maxpool2d_forward_kernel(const float* input, float* output, floa
                 int ih = oh * stride + ph;
                 int iw = ow * stride + pw;
                 int in_idx = b * h * w * c + ih * w * c + iw * c + ch;
-                max_val = fmaxf(max_val, input[in_idx]);
-                max_idx = in_idx;
+                if (input[in_idx] > max_val) {
+                    max_val = input[in_idx];
+                    max_idx = in_idx;
+                }
             }
         }
         
