@@ -63,7 +63,8 @@ __global__ void conv2d_forward_relu_fused(const float* input, float* output,
                         int iw = ow * stride - padding + kw;
                         if (iw >= 0 && iw < in_w) {
                             int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + ic;
-                            int w_idx = oc * in_c * 9 + ic * 9 + kh * 3 + kw;
+                            int w_idx = oc * in_c * kernel_size * kernel_size + 
+                                        ic * kernel_size * kernel_size + kh * kernel_size + kw;
                             sum += input[in_idx] * weights[w_idx];
                         }
                     }
