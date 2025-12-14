@@ -3,6 +3,7 @@ build/*.o
 build/phase1
 build/phase2
 build/phase3
+build/phase3_*
 build/phase4
 build/phase4_*
 *.o
