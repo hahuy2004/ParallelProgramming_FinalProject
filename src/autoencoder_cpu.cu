@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstring>
 
+// Constructor: Khởi tạo autoencoder
 AutoencoderCPU::AutoencoderCPU() : current_batch_size(0) {
     initialize_weights();
 }
@@ -14,10 +15,12 @@ AutoencoderCPU::AutoencoderCPU() : current_batch_size(0) {
 AutoencoderCPU::~AutoencoderCPU() {
 }
 
+// Khởi tạo weights bằng Xavier initialization
 void AutoencoderCPU::initialize_weights() {
+    // Dùng seed cố định để reproducible (có thể uncomment random_device để random)
     // std::random_device rd;
     // std::mt19937 gen(rd());
-    std::mt19937 gen(42);      // Fixed seed for reproducibility
+    std::mt19937 gen(42);      // Fixed seed
     
     // Xavier/He initialization
     auto init_conv = [&](std::vector<float>& weights, int in_c, int out_c, int k) {
@@ -83,10 +86,13 @@ void AutoencoderCPU::allocate_buffers(int batch_size) {
     conv5_bias_grad.resize(conv5_bias.size(), 0.0f);
 }
 
+// Convolution 2D forward pass
+// Tính output = conv(input, weights) + bias
 void AutoencoderCPU::conv2d_forward(const float* input, float* output,
                                      const float* weights, const float* bias,
                                      int batch, int in_h, int in_w, int in_c,
                                      int out_c, int kernel_size, int stride, int padding) {
+    // Tính kích thước output
     int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
     int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
     
@@ -120,15 +126,18 @@ void AutoencoderCPU::conv2d_forward(const float* input, float* output,
     }
 }
 
+// ReLU activation: max(0, x)
 void AutoencoderCPU::relu_forward(const float* input, float* output, int size) {
     for (int i = 0; i < size; ++i) {
         output[i] = std::max(0.0f, input[i]);
     }
 }
 
+// Max pooling 2D: Lấy giá trị lớn nhất trong mỗi pool window
 void AutoencoderCPU::maxpool2d_forward(const float* input, float* output,
                                         int batch, int h, int w, int c,
                                         int pool_size, int stride) {
+    // Tính kích thước output sau pooling
     int out_h = (h - pool_size) / stride + 1;
     int out_w = (w - pool_size) / stride + 1;
     
@@ -155,9 +164,11 @@ void AutoencoderCPU::maxpool2d_forward(const float* input, float* output,
     }
 }
 
+// Upsampling 2D: Phóng to ảnh bằng nearest neighbor interpolation
 void AutoencoderCPU::upsample2d_forward(const float* input, float* output,
                                          int batch, int in_h, int in_w, int c,
                                          int scale_factor) {
+    // Kích thước output sau khi phóng to
     int out_h = in_h * scale_factor;
     int out_w = in_w * scale_factor;
     
@@ -176,6 +187,8 @@ void AutoencoderCPU::upsample2d_forward(const float* input, float* output,
     }
 }
 
+// Convolution 2D backward pass
+// Tính gradient cho input, weights và bias từ gradient của output
 void AutoencoderCPU::conv2d_backward(const float* grad_output, float* grad_input,
                                       float* grad_weights, float* grad_bias,
                                       const float* input, const float* weights,
@@ -184,7 +197,7 @@ void AutoencoderCPU::conv2d_backward(const float* grad_output, float* grad_input
     int out_h = (in_h + 2 * padding - kernel_size) / stride + 1;
     int out_w = (in_w + 2 * padding - kernel_size) / stride + 1;
     
-    // Initialize gradients to zero
+    // Khởi tạo gradients = 0
     if (grad_input) {
         std::fill(grad_input, grad_input + batch * in_h * in_w * in_c, 0.0f);
     }
@@ -227,6 +240,7 @@ void AutoencoderCPU::conv2d_backward(const float* grad_output, float* grad_input
     }
 }
 
+// ReLU backward: gradient = 0 nếu output <= 0, giữ nguyên nếu output > 0
 void AutoencoderCPU::relu_backward(const float* grad_output, float* grad_input,
                                     const float* output, int size) {
     for (int i = 0; i < size; ++i) {
@@ -234,6 +248,7 @@ void AutoencoderCPU::relu_backward(const float* grad_output, float* grad_input,
     }
 }
 
+// Max pooling backward: Gradient chỉ truyền về vị trí có giá trị max
 void AutoencoderCPU::maxpool2d_backward(const float* grad_output, float* grad_input,
                                          const float* input, const float* output,
                                          int batch, int h, int w, int c,
@@ -241,7 +256,7 @@ void AutoencoderCPU::maxpool2d_backward(const float* grad_output, float* grad_in
     int out_h = (h - pool_size) / stride + 1;
     int out_w = (w - pool_size) / stride + 1;
     
-    // Initialize gradient input to zero
+    // Khởi tạo gradient input = 0
     std::fill(grad_input, grad_input + batch * h * w * c, 0.0f);
     
     for (int b = 0; b < batch; ++b) {
@@ -270,13 +285,14 @@ void AutoencoderCPU::maxpool2d_backward(const float* grad_output, float* grad_in
     }
 }
 
+// Upsample backward: Cộng dồn gradient từ các vị trí được duplicate
 void AutoencoderCPU::upsample2d_backward(const float* grad_output, float* grad_input,
                                           int batch, int in_h, int in_w, int c,
                                           int scale_factor) {
     int out_h = in_h * scale_factor;
     int out_w = in_w * scale_factor;
     
-    // Initialize gradient input to zero
+    // Khởi tạo gradient input = 0
     std::fill(grad_input, grad_input + batch * in_h * in_w * c, 0.0f);
     
     for (int b = 0; b < batch; ++b) {
@@ -296,10 +312,11 @@ void AutoencoderCPU::upsample2d_backward(const float* grad_output, float* grad_i
     }
 }
 
+// Forward pass: Chạy toàn bộ mạng từ input đến output
 void AutoencoderCPU::forward(const float* input, int batch_size) {
     allocate_buffers(batch_size);
     
-    // ENCODER FORWARD PASS
+    // ===== ENCODER: Nén ảnh từ 32x32x3 -> 8x8x128 =====
     // Conv1 + ReLU: (32, 32, 3) -> (32, 32, 256)
     conv2d_forward(input, conv1_out.data(), conv1_weight.data(), conv1_bias.data(),
                    batch_size, INPUT_H, INPUT_W, INPUT_C, CONV1_FILTERS, 3, 1, 1);
@@ -318,7 +335,7 @@ void AutoencoderCPU::forward(const float* input, int batch_size) {
     maxpool2d_forward(conv2_out.data(), pool2_out.data(),
                       batch_size, 16, 16, CONV2_FILTERS, 2, 2);
     
-    // DECODER FORWARD PASS
+    // ===== DECODER: Giải nén từ 8x8x128 -> 32x32x3 =====
     // Conv3 + ReLU: (8, 8, 128) -> (8, 8, 128)
     conv2d_forward(pool2_out.data(), conv3_out.data(), conv3_weight.data(), conv3_bias.data(),
                    batch_size, LATENT_H, LATENT_W, LATENT_C, LATENT_C, 3, 1, 1);
@@ -342,8 +359,9 @@ void AutoencoderCPU::forward(const float* input, int batch_size) {
                    batch_size, INPUT_H, INPUT_W, CONV1_FILTERS, INPUT_C, 3, 1, 1);
 }
 
+// Backward pass: Tính gradient và update tất cả weights
 void AutoencoderCPU::backward(const float* input, int batch_size) {
-    // Compute loss gradient: d_loss/d_output = 2 * (output - target) / N
+    // Tính gradient của loss (MSE): d_loss/d_output = 2 * (output - target) / N
     int total_elements = grad_conv5.size();
     for (size_t i = 0; i < grad_conv5.size(); ++i) {
         grad_conv5[i] = 2.0f * (conv5_out[i] - input[i]) / total_elements;
@@ -361,8 +379,8 @@ void AutoencoderCPU::backward(const float* input, int batch_size) {
     std::fill(conv5_weight_grad.begin(), conv5_weight_grad.end(), 0.0f);
     std::fill(conv5_bias_grad.begin(), conv5_bias_grad.end(), 0.0f);
     
-    // DECODER BACKWARD PASS
-    // Backward through Conv5: (32, 32, 256) -> (32, 32, 3)
+    // ===== DECODER BACKWARD: Tính gradient từ output về latent =====
+    // Backward qua Conv5: (32, 32, 256) -> (32, 32, 3)
     conv2d_backward(grad_conv5.data(), grad_up2.data(),
                     conv5_weight_grad.data(), conv5_bias_grad.data(),
                     up2_out.data(), conv5_weight.data(),
@@ -399,8 +417,8 @@ void AutoencoderCPU::backward(const float* input, int batch_size) {
                     batch_size, LATENT_H, LATENT_W, LATENT_C,
                     LATENT_C, 3, 1, 1);
     
-    // ENCODER BACKWARD PASS
-    // Backward through MaxPool2: (16, 16, 128) -> (8, 8, 128)
+    // ===== ENCODER BACKWARD: Tính gradient từ latent về input =====
+    // Backward qua MaxPool2: (16, 16, 128) -> (8, 8, 128)
     maxpool2d_backward(grad_pool2.data(), grad_conv2.data(),
                        conv2_out.data(), pool2_out.data(),
                        batch_size, 16, 16, CONV2_FILTERS, 2, 2);
@@ -437,8 +455,9 @@ void AutoencoderCPU::backward(const float* input, int batch_size) {
                     CONV1_FILTERS, 3, 1, 1);
 }
 
+// Update weights: Gradient descent đơn giản (weight -= lr * gradient)
 void AutoencoderCPU::update_weights(float learning_rate) {
-    // Simple gradient descent for weights
+    // Update weights của tất cả các layer
     for (size_t i = 0; i < conv1_weight.size(); ++i) {
         conv1_weight[i] -= learning_rate * conv1_weight_grad[i];
     }

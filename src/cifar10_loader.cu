@@ -45,6 +45,8 @@ bool Cifar10Loader::load() {
     return true;
 }
 
+// Đọc 1 file batch từ CIFAR-10
+// Format: mỗi record = 1 byte label + 3072 bytes ảnh (32x32x3)
 bool Cifar10Loader::load_batch(const std::string& filepath,
                                 std::vector<float>& images,
                                 std::vector<uint8_t>& labels) {
@@ -53,7 +55,7 @@ bool Cifar10Loader::load_batch(const std::string& filepath,
         return false;
     }
     
-    // Each record: 1 byte label + 3072 bytes image (32x32x3)
+    // Mỗi record: 1 byte label + 3072 bytes ảnh (32x32x3)
     const int record_size = 1 + IMAGE_PIXELS;
     
     // Get file size
@@ -73,15 +75,15 @@ bool Cifar10Loader::load_batch(const std::string& filepath,
             return false;
         }
         
-        // First byte is label
+        // Byte đầu tiên là label (0-9)
         labels.push_back(buffer[0]);
         
-        // Next 3072 bytes are image data (R, G, B channels)
-        // CIFAR-10 format: all R values, then all G values, then all B values
+        // 3072 bytes tiếp theo là dữ liệu ảnh (R, G, B channels)
+        // Format CIFAR-10: tất cả giá trị R, rồi tất cả G, rồi tất cả B
         size_t start_idx = images.size();
         images.resize(start_idx + IMAGE_PIXELS);
         
-        // Convert to HWC format and normalize to [0, 1]
+        // Chuyển đổi sang format HWC (Height-Width-Channel) và normalize về [0, 1]
         for (int c = 0; c < NUM_CHANNELS; ++c) {
             for (int h = 0; h < IMAGE_SIZE; ++h) {
                 for (int w = 0; w < IMAGE_SIZE; ++w) {
