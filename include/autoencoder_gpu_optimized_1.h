@@ -87,6 +87,9 @@ private:
     
     float* d_loss;
     
+    // Pinned memory for faster H2D transfers
+    float* h_input_pinned;
+    
     void forward();
     void backward();
     void update_weights(float learning_rate);
