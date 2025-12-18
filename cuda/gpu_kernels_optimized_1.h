@@ -10,15 +10,8 @@ void launch_conv2d_shared_forward(
     int C_out, int H_out, int W_out,
     int kernel_size, int stride, int padding);
 
-void launch_conv2d_shared_backward(
-    const float* d_grad_output, 
-    const float* d_input,
-    const float* d_weights, 
-    float* d_grad_input,
-    float* d_grad_weights, 
-    float* d_grad_bias,
-    int in_h, int in_w, int in_c,
-    int out_c, int out_h, int out_w,
-    int kernel_size, int stride, int padding);
+// Helper functions to copy biases to constant memory
+void copy_bias_to_constant_memory(
+    const float* d_bias, int size, int layer);  // layer: 0-4 for conv1-5
 
 #endif // GPU_KERNELS_OPTIMIZED_1_H
