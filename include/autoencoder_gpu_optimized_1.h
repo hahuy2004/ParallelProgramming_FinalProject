@@ -21,6 +21,7 @@ public:
     void load_weights(const std::string& filepath);
     
     void extract_features(const float* input_chw, float* output_features);
+    void reconstruct(const float* input_chw, float* output_chw);
 
 private:
     static constexpr int INPUT_H = 32;

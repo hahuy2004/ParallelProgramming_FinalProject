@@ -531,3 +531,14 @@ void AutoencoderGPUOptimized1::extract_features(const float* input_chw, float* o
     // d_pool2_out contains 128*8*8 = 8192 features
     CUDA_CHECK(cudaMemcpy(output_features, d_pool2_out, 128*8*8*sizeof(float), cudaMemcpyDeviceToHost));
 }
+
+void AutoencoderGPUOptimized1::reconstruct(const float* input_chw, float* output_reconstructed) {
+    const int image_size = INPUT_C * INPUT_H * INPUT_W; // 3072 pixels
+    // Copy input qua device 
+    CUDA_CHECK(cudaMemcpy(d_input, input_chw, image_size * sizeof(float), cudaMemcpyHostToDevice));
+    // Chạy một lần forward 
+    forward();
+    CUDA_CHECK(cudaDeviceSynchronize());
+    // Copy kết quả tái tạo từ device về host
+    CUDA_CHECK(cudaMemcpy(output_reconstructed, d_conv5_out, image_size * sizeof(float), cudaMemcpyDeviceToHost));
+}

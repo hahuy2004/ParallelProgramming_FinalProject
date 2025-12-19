@@ -25,6 +25,7 @@ public:
     
     // Extract features from encoder (bottleneck: 128*8*8 = 8192 features)
     void extract_features(const float* input_chw, float* output_features);
+    void reconstruct(const float* input_chw, float* output_chw);
 
 private:
     // Network architecture parameters
