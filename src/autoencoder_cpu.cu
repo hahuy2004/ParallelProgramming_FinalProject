@@ -275,7 +275,7 @@ void AutoencoderCPU::maxpool2d_backward(const float* grad_output, float* grad_in
                     float max_val = output[out_idx];
                     float grad_val = grad_output[out_idx];
                     
-                    // Find which input element was the max and assign gradient to it
+                    // Tìm vị trí có giá trị max trong pool window và gán gradient cho nó
                     for (int ph = 0; ph < pool_size; ++ph) {
                         for (int pw = 0; pw < pool_size; ++pw) {
                             int ih = oh * stride + ph;
@@ -314,7 +314,7 @@ void AutoencoderCPU::upsample2d_backward(const float* grad_output, float* grad_i
                     int in_idx = b * c * in_h * in_w + ch * in_h * in_w + ih * in_w + iw;
                     int out_idx = b * c * out_h * out_w + ch * out_h * out_w + oh * out_w + ow;
                     
-                    // Sum all gradients that correspond to the same input pixel
+                    // Tính tổng các gradient tương ứng với cùng một pixel input
                     grad_input[in_idx] += grad_output[out_idx];
                 }
             }
@@ -454,7 +454,7 @@ void AutoencoderCPU::backward(const float* input, int batch_size) {
                   conv1_out.data(), grad_conv1.size());
     
     // Backward through Conv1: (32, 32, 3) -> (32, 32, 256)
-    // Don't need grad_input for the first layer
+    // Không cần tính grad_input ở layer đầu tiên
     std::vector<float> temp_input(batch_size * INPUT_H * INPUT_W * INPUT_C);
     std::memcpy(temp_input.data(), input, temp_input.size() * sizeof(float));
     
@@ -484,7 +484,7 @@ void AutoencoderCPU::update_weights(float learning_rate) {
         conv5_weight[i] -= learning_rate * conv5_weight_grad[i];
     }
     
-    // Simple gradient descent for biases
+    // Gradient descent đơn giản cho biases
     for (size_t i = 0; i < conv1_bias.size(); ++i) {
         conv1_bias[i] -= learning_rate * conv1_bias_grad[i];
     }
@@ -591,7 +591,7 @@ void AutoencoderCPU::extract_features(const std::vector<float>& images,
         
         const float* batch_data = &images[start_idx * INPUT_H * INPUT_W * INPUT_C];
         
-        // Run encoder only
+        // Chạy các layer của encoder
         allocate_buffers(actual_batch_size);
         
         conv2d_forward(batch_data, conv1_out.data(), conv1_weight.data(), conv1_bias.data(),
@@ -618,7 +618,7 @@ void AutoencoderCPU::extract_features(const std::vector<float>& images,
 void AutoencoderCPU::reconstruct(const float* input_chw, float* output_reconstructed) {
     const int image_size = INPUT_C * INPUT_H * INPUT_W; // 3072 pixels
     
-    // Run full forward pass (encoder + decoder) with batch_size=1
+    // Chạy toàn bộ mạng (encoder + decoder) với batch_size=1
     forward(input_chw, 1);
     
     // Copy reconstructed output
