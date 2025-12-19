@@ -18,9 +18,9 @@ phase3
 phase4
 
 # Model weights and results
-weights/*.weights
-weights/*.model
-weights/*.bin
+# weights/*.weights
+# weights/*.model
+# weights/*.bin
 results/*.txt
 results/*.csv
 results/*.png
@@ -81,6 +81,7 @@ docs/_build/
 *.backup
 
 # Add embedded Git repository to ignore
+third_lib/
 third_lib/libsvm/.git/
 third_lib/libsvm/.github/
 third_lib/libsvm
