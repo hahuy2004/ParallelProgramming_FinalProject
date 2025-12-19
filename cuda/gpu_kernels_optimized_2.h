@@ -24,4 +24,12 @@ void launch_maxpool_unroll_backward(
     float* grad_input,
     int C, int H, int W,
     int pool_size, int stride);
+
+void launch_conv2d_input_grad_unroll(
+    const float* grad_output,
+    const float* weight,
+    float* grad_input,
+    int C_in, int H_in, int W_in,
+    int C_out, int H_out, int W_out,
+    int kernel_size, int stride, int padding);
 #endif // GPU_KERNELS_OPTIMIZED_2_H
