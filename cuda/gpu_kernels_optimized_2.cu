@@ -254,3 +254,88 @@ void launch_maxpool_unroll_backward(
     
     CUDA_CHECK(cudaGetLastError());
 }
+
+
+// Conv2D input gradient kernel with configurable parameters
+__global__ void conv2d_input_grad_unroll_kernel(
+    const float* grad_output,  // [C_out, H_out, W_out]
+    const float* weight,       // [C_out, C_in, kernel_size, kernel_size]
+    float* grad_input,         // [C_in, H_in, W_in]
+    int C_in, int H_in, int W_in,
+    int C_out, int H_out, int W_out,
+    int kernel_size, int stride, int padding)
+{
+    int ic = blockIdx.x;
+    int ih = blockIdx.y * blockDim.y + threadIdx.y;
+    int iw = blockIdx.z * blockDim.z + threadIdx.z;
+    
+    if (ic >= C_in || ih >= H_in || iw >= W_in) return;
+    
+    float sum = 0.0f;
+    if(kernel_size==3){
+        for (int oc = 0; oc < C_out; oc++) {
+            #pragma unroll
+            for (int kh = 0; kh < 3; kh++) {
+                #pragma unroll
+                for (int kw = 0; kw < 3; kw++) {
+                    // For stride > 1, need to check if this input contributes to output
+                    int oh_temp = ih + padding - kh;
+                    int ow_temp = iw + padding - kw;
+                    
+                    if (oh_temp % stride == 0 && ow_temp % stride == 0) {
+                        int oh = oh_temp / stride;
+                        int ow = ow_temp / stride;
+                        
+                        if (oh >= 0 && oh < H_out && ow >= 0 && ow < W_out) {
+                            float grad = grad_output[oc * H_out * W_out + oh * W_out + ow];
+                            int weight_idx = ((oc * C_in + ic) * 3 + kh) * 3 + kw;
+                            sum += grad * weight[weight_idx];
+                        }
+                    }
+                }
+            }
+        }
+    }
+    else{
+        for (int oc = 0; oc < C_out; oc++) {
+            for (int kh = 0; kh < kernel_size; kh++) {
+                for (int kw = 0; kw < kernel_size; kw++) {
+                    // For stride > 1, need to check if this input contributes to output
+                    int oh_temp = ih + padding - kh;
+                    int ow_temp = iw + padding - kw;
+                    
+                    if (oh_temp % stride == 0 && ow_temp % stride == 0) {
+                        int oh = oh_temp / stride;
+                        int ow = ow_temp / stride;
+                        
+                        if (oh >= 0 && oh < H_out && ow >= 0 && ow < W_out) {
+                            float grad = grad_output[oc * H_out * W_out + oh * W_out + ow];
+                            int weight_idx = ((oc * C_in + ic) * kernel_size + kh) * kernel_size + kw;
+                            sum += grad * weight[weight_idx];
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    grad_input[ic * H_in * W_in + ih * W_in + iw] = sum;
+}
+
+void launch_conv2d_input_grad_unroll(
+    const float* grad_output,
+    const float* weight,
+    float* grad_input,
+    int C_in, int H_in, int W_in,
+    int C_out, int H_out, int W_out,
+    int kernel_size, int stride, int padding)
+{
+    dim3 blockDim(1, 16, 16);
+    dim3 gridDim(C_in, (H_in + 15) / 16, (W_in + 15) / 16);
+    
+    conv2d_input_grad_unroll_kernel<<<gridDim, blockDim>>>(
+        grad_output, weight, grad_input,
+        C_in, H_in, W_in, C_out, H_out, W_out, kernel_size, stride, padding);
+    
+    CUDA_CHECK(cudaGetLastError());
+}
