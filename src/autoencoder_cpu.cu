@@ -109,7 +109,8 @@ void AutoencoderCPU::conv2d_forward(const float* input, float* output,
                                 int iw = ow * stride - padding + kw;
                                 
                                 if (ih >= 0 && ih < in_h && iw >= 0 && iw < in_w) {
-                                    int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + ic;
+                                    // CHW layout: [batch][channel][height][width]
+                                    int in_idx = b * in_c * in_h * in_w + ic * in_h * in_w + ih * in_w + iw;
                                     int w_idx = oc * in_c * kernel_size * kernel_size + 
                                                ic * kernel_size * kernel_size + kh * kernel_size + kw;
                                     sum += input[in_idx] * weights[w_idx];
@@ -118,7 +119,8 @@ void AutoencoderCPU::conv2d_forward(const float* input, float* output,
                         }
                     }
                     
-                    int out_idx = b * out_h * out_w * out_c + oh * out_w * out_c + ow * out_c + oc;
+                    // CHW layout: [batch][channel][height][width]
+                    int out_idx = b * out_c * out_h * out_w + oc * out_h * out_w + oh * out_w + ow;
                     output[out_idx] = sum;
                 }
             }
@@ -151,12 +153,14 @@ void AutoencoderCPU::maxpool2d_forward(const float* input, float* output,
                         for (int pw = 0; pw < pool_size; ++pw) {
                             int ih = oh * stride + ph;
                             int iw = ow * stride + pw;
-                            int in_idx = b * h * w * c + ih * w * c + iw * c + ch;
+                            // CHW layout: [batch][channel][height][width]
+                            int in_idx = b * c * h * w + ch * h * w + ih * w + iw;
                             max_val = std::max(max_val, input[in_idx]);
                         }
                     }
                     
-                    int out_idx = b * out_h * out_w * c + oh * out_w * c + ow * c + ch;
+                    // CHW layout
+                    int out_idx = b * c * out_h * out_w + ch * out_h * out_w + oh * out_w + ow;
                     output[out_idx] = max_val;
                 }
             }
@@ -178,8 +182,9 @@ void AutoencoderCPU::upsample2d_forward(const float* input, float* output,
                 for (int ow = 0; ow < out_w; ++ow) {
                     int ih = oh / scale_factor;
                     int iw = ow / scale_factor;
-                    int in_idx = b * in_h * in_w * c + ih * in_w * c + iw * c + ch;
-                    int out_idx = b * out_h * out_w * c + oh * out_w * c + ow * c + ch;
+                    // CHW layout: [batch][channel][height][width]
+                    int in_idx = b * c * in_h * in_w + ch * in_h * in_w + ih * in_w + iw;
+                    int out_idx = b * c * out_h * out_w + ch * out_h * out_w + oh * out_w + ow;
                     output[out_idx] = input[in_idx];
                 }
             }
@@ -206,7 +211,8 @@ void AutoencoderCPU::conv2d_backward(const float* grad_output, float* grad_input
         for (int oc = 0; oc < out_c; ++oc) {
             for (int oh = 0; oh < out_h; ++oh) {
                 for (int ow = 0; ow < out_w; ++ow) {
-                    int out_idx = b * out_h * out_w * out_c + oh * out_w * out_c + ow * out_c + oc;
+                    // CHW layout: [batch][channel][height][width]
+                    int out_idx = b * out_c * out_h * out_w + oc * out_h * out_w + oh * out_w + ow;
                     float grad_out_val = grad_output[out_idx];
                     
                     // Gradient w.r.t bias
@@ -219,7 +225,8 @@ void AutoencoderCPU::conv2d_backward(const float* grad_output, float* grad_input
                                 int iw = ow * stride - padding + kw;
                                 
                                 if (ih >= 0 && ih < in_h && iw >= 0 && iw < in_w) {
-                                    int in_idx = b * in_h * in_w * in_c + ih * in_w * in_c + iw * in_c + ic;
+                                    // CHW layout: [batch][channel][height][width]
+                                    int in_idx = b * in_c * in_h * in_w + ic * in_h * in_w + ih * in_w + iw;
                                     int w_idx = oc * in_c * kernel_size * kernel_size + 
                                                ic * kernel_size * kernel_size + kh * kernel_size + kw;
                                     
@@ -263,7 +270,8 @@ void AutoencoderCPU::maxpool2d_backward(const float* grad_output, float* grad_in
         for (int ch = 0; ch < c; ++ch) {
             for (int oh = 0; oh < out_h; ++oh) {
                 for (int ow = 0; ow < out_w; ++ow) {
-                    int out_idx = b * out_h * out_w * c + oh * out_w * c + ow * c + ch;
+                    // CHW layout: [batch][channel][height][width]
+                    int out_idx = b * c * out_h * out_w + ch * out_h * out_w + oh * out_w + ow;
                     float max_val = output[out_idx];
                     float grad_val = grad_output[out_idx];
                     
@@ -272,7 +280,8 @@ void AutoencoderCPU::maxpool2d_backward(const float* grad_output, float* grad_in
                         for (int pw = 0; pw < pool_size; ++pw) {
                             int ih = oh * stride + ph;
                             int iw = ow * stride + pw;
-                            int in_idx = b * h * w * c + ih * w * c + iw * c + ch;
+                            // CHW layout
+                            int in_idx = b * c * h * w + ch * h * w + ih * w + iw;
                             
                             if (std::abs(input[in_idx] - max_val) < 1e-8f) {
                                 grad_input[in_idx] += grad_val;
@@ -301,8 +310,9 @@ void AutoencoderCPU::upsample2d_backward(const float* grad_output, float* grad_i
                 for (int ow = 0; ow < out_w; ++ow) {
                     int ih = oh / scale_factor;
                     int iw = ow / scale_factor;
-                    int in_idx = b * in_h * in_w * c + ih * in_w * c + iw * c + ch;
-                    int out_idx = b * out_h * out_w * c + oh * out_w * c + ow * c + ch;
+                    // CHW layout: [batch][channel][height][width]
+                    int in_idx = b * c * in_h * in_w + ch * in_h * in_w + ih * in_w + iw;
+                    int out_idx = b * c * out_h * out_w + ch * out_h * out_w + oh * out_w + ow;
                     
                     // Sum all gradients that correspond to the same input pixel
                     grad_input[in_idx] += grad_output[out_idx];
@@ -605,6 +615,16 @@ void AutoencoderCPU::extract_features(const std::vector<float>& images,
     }
 }
 
+void AutoencoderCPU::reconstruct(const float* input_chw, float* output_reconstructed) {
+    const int image_size = INPUT_C * INPUT_H * INPUT_W; // 3072 pixels
+    
+    // Run full forward pass (encoder + decoder) with batch_size=1
+    forward(input_chw, 1);
+    
+    // Copy reconstructed output
+    std::memcpy(output_reconstructed, conv5_out.data(), image_size * sizeof(float));
+}
+
 void AutoencoderCPU::save_weights(const std::string& filepath) {
     std::ofstream file(filepath, std::ios::binary);
     if (!file.is_open()) {
@@ -661,3 +681,4 @@ void AutoencoderCPU::load_weights(const std::string& filepath) {
     file.close();
     std::cout << "Weights loaded from " << filepath << std::endl;
 }
+

@@ -80,18 +80,13 @@ bool Cifar10Loader::load_batch(const std::string& filepath,
         
         // 3072 bytes tiếp theo là dữ liệu ảnh (R, G, B channels)
         // Format CIFAR-10: tất cả giá trị R, rồi tất cả G, rồi tất cả B
+        // Giữ nguyên format CHW (Channel-Height-Width) vì GPU kernels expect CHW
         size_t start_idx = images.size();
         images.resize(start_idx + IMAGE_PIXELS);
         
-        // Chuyển đổi sang format HWC (Height-Width-Channel) và normalize về [0, 1]
-        for (int c = 0; c < NUM_CHANNELS; ++c) {
-            for (int h = 0; h < IMAGE_SIZE; ++h) {
-                for (int w = 0; w < IMAGE_SIZE; ++w) {
-                    int cifar_idx = 1 + c * IMAGE_SIZE * IMAGE_SIZE + h * IMAGE_SIZE + w;
-                    int hwc_idx = start_idx + h * IMAGE_SIZE * NUM_CHANNELS + w * NUM_CHANNELS + c;
-                    images[hwc_idx] = buffer[cifar_idx] / 255.0f;
-                }
-            }
+        // Normalize về [0, 1] và giữ format CHW
+        for (int i = 0; i < IMAGE_PIXELS; ++i) {
+            images[start_idx + i] = buffer[1 + i] / 255.0f;
         }
     }
     

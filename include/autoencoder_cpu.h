@@ -24,6 +24,9 @@ public:
                          int num_images,
                          std::vector<float>& features);
     
+    // Reconstruct: Chạy encoder-decoder để tái tạo ảnh từ input
+    void reconstruct(const float* input_chw, float* output_reconstructed);
+    
     // Lưu và load weights của model
     void save_weights(const std::string& filepath);
     void load_weights(const std::string& filepath);

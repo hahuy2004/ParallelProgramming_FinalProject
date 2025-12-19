@@ -14,9 +14,9 @@ int main(int argc, char** argv) {
         data_dir = argv[1];
     }
     
-    // GPU OPTIMIZED PHASE: Full training với 50000 ảnh, 20 epochs
+    // GPU OPTIMIZED PHASE: Full training với 50000 ảnh, 10 epochs
     int batch_size = 64;  
-    int epochs = 5;
+    int epochs = 10;
     float learning_rate = 0.001f;
     int num_train_images = 50000; // Change to 50000 for full training
     

@@ -9,9 +9,9 @@ int main(int argc, char** argv) {
     std::cout << "========================================" << std::endl;
     
     // ==================== CONFIGURATION ==================== //
-    // GPU PHASE: Full training với 50000 ảnh, 20 epochs
+    // GPU PHASE: Full training với 50000 ảnh, 10 epochs
     int batch_size = 64;  
-    int epochs = 5;
+    int epochs = 10;
     float learning_rate = 0.001f;
     int num_train_images = 50000; // Change to 50000 for full training
     std::string data_dir = "cifar-10-batches-bin";

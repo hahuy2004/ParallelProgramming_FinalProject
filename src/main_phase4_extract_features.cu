@@ -22,12 +22,12 @@ void save_features(const std::string& filepath,
         std::cerr << "Failed to create file: " << filepath << std::endl;
         return;
     }
-    
-    // Write metadata
+
+    // Viết metadata: số mẫu, số chiều
     out.write(reinterpret_cast<const char*>(&num_images), sizeof(int));
     out.write(reinterpret_cast<const char*>(&feature_dim), sizeof(int));
     
-    // Write features
+    // Viết dữ liệu features
     out.write(reinterpret_cast<const char*>(features.data()), 
               features.size() * sizeof(float));
     
@@ -48,7 +48,7 @@ void extract_and_save_features(const std::string& mode,
     std::cout << "Weights: " << weights_path << std::endl;
     std::cout << "Output directory: " << output_dir << std::endl;
     
-    // Create output directory
+    // Tạo thư mục nếu chưa tồn tại
     std::string mkdir_cmd = "mkdir -p " + output_dir;
     system(mkdir_cmd.c_str());
     
@@ -72,7 +72,7 @@ void extract_and_save_features(const std::string& mode,
         AutoencoderGPU autoencoder;
         autoencoder.load_weights(weights_path);
         
-        // GPU naive uses per-image API, need to loop through images
+        // GPU naive dùng API per-image, cần lặp qua từng ảnh
         std::cout << "Extracting training features..." << std::endl;
         train_features.resize(num_train_samples * FEATURE_DIM);
         const int IMAGE_SIZE = 3 * 32 * 32;
@@ -102,7 +102,7 @@ void extract_and_save_features(const std::string& mode,
         AutoencoderGPUOptimized1 autoencoder;
         autoencoder.load_weights(weights_path);
         
-        // GPU optimized versions use per-image API
+        // GPU optimized versions dùng API per-image, cần lặp qua từng ảnh
         std::cout << "Extracting training features..." << std::endl;
         train_features.resize(num_train_samples * FEATURE_DIM);
         const int IMAGE_SIZE = 3 * 32 * 32;
@@ -132,7 +132,7 @@ void extract_and_save_features(const std::string& mode,
         AutoencoderGPUOptimized2 autoencoder;
         autoencoder.load_weights(weights_path);
         
-        // GPU optimized versions use per-image API
+        // GPU optimized versions dùng API per-image, cần lặp qua từng ảnh
         std::cout << "Extracting training features..." << std::endl;
         train_features.resize(num_train_samples * FEATURE_DIM);
         const int IMAGE_SIZE = 3 * 32 * 32;
@@ -164,7 +164,7 @@ void extract_and_save_features(const std::string& mode,
     
     std::cout << "Feature extraction completed in " << extract_time << " seconds" << std::endl;
     
-    // Save features
+    // Lưu features
     std::string train_path = output_dir + "/train_features.bin";
     std::string test_path = output_dir + "/test_features.bin";
     
@@ -180,7 +180,7 @@ int main(int argc, char** argv) {
     std::cout << "PHASE 4: Extract Features (Single Model)" << std::endl;
     std::cout << "========================================" << std::endl;
     
-    // Configuration - default mode is gpu_optimized_1
+    // Configuration - default mode là gpu_optimized_1
     std::string mode = "gpu_optimized_1";
     std::string data_dir = "cifar-10-batches-bin";
     
@@ -223,14 +223,14 @@ int main(int argc, char** argv) {
     const auto& train_images = loader.get_train_images();
     const auto& test_images = loader.get_test_images();
     
-    // Determine number of samples and weights path based on mode
+    // Định nghĩa số lượng mẫu và đường dẫn weights dựa trên mode
     int num_train_samples = loader.get_train_size();
     int num_test_samples = loader.get_test_size();
     std::string weights_path;
     
     if (mode == "cpu") {
-        num_train_samples = 500;  // CPU was trained with only 500 images
-        num_test_samples = 1000;  // CPU: only extract 1000 test images
+        num_train_samples = 500;  // CPU chỉ train 500 ảnh
+        num_test_samples = 1000;  // CPU chỉ trích xuất 1000 ảnh test
         std::cout << "\nNOTE: CPU mode - using " << num_train_samples 
                   << " training samples and " << num_test_samples << " test samples" << std::endl;
         weights_path = "weights/autoencoder_cpu.bin";
@@ -242,16 +242,16 @@ int main(int argc, char** argv) {
         weights_path = "weights/autoencoder_gpu_optimized_2.bin";
     }
     
-    // Check if weights file exists
+    // Kiểm tra xem file weights đã tồn tại chưa
     if (!std::ifstream(weights_path).good()) {
         std::cerr << "Weights file not found: " << weights_path << std::endl;
         return 1;
     }
     
-    // Create output directory based on mode
+    // Tạo thư mục output dựa trên mode
     std::string output_dir = "features/" + mode;
     
-    // Extract and save features using the dedicated function
+    // Extract và lưu features sử dụng hàm đã định nghĩa
     std::cout << "\n=== Extraction Summary ===" << std::endl;
     std::cout << "Mode: " << mode << std::endl;
     std::cout << "Training samples: " << num_train_samples << std::endl;
