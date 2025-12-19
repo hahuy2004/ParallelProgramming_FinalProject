@@ -1,3 +1,4 @@
+// Naive GPU Implementation
 #include "../include/autoencoder_gpu_optimized_2.h"
 #include "../cuda/gpu_kernels_optimized_2.h"
 #include "../cuda/gpu_kernels_naive.h"
@@ -314,7 +315,7 @@ void AutoencoderGPUOptimized2::forward() {
 }
 
 void AutoencoderGPUOptimized2::backward() {
-        CUDA_CHECK(cudaMemset(d_grad_relu1, 0, 256 * 32 * 32 * sizeof(float)));
+    CUDA_CHECK(cudaMemset(d_grad_relu1, 0, 256 * 32 * 32 * sizeof(float)));
     CUDA_CHECK(cudaMemset(d_grad_relu2, 0, 128 * 16 * 16 * sizeof(float)));
     
     // Conv5 backward - kernel_size=3, stride=1, padding=1
@@ -323,7 +324,7 @@ void AutoencoderGPUOptimized2::backward() {
     
     launch_conv2d_bias_grad(d_grad_conv5, d_conv5_bias_grad, 3, 32, 32);
     
-    launch_conv2d_input_grad(d_grad_conv5, d_conv5_weight, d_grad_up2,
+    launch_conv2d_input_grad_unroll(d_grad_conv5, d_conv5_weight, d_grad_up2,
                             256, 32, 32, 3, 32, 32, 3, 1, 1);
     
     // Upsample2 backward - scale_factor=2
@@ -338,7 +339,7 @@ void AutoencoderGPUOptimized2::backward() {
     
     launch_conv2d_bias_grad(d_grad_conv4, d_conv4_bias_grad, 256, 16, 16);
     
-    launch_conv2d_input_grad(d_grad_conv4, d_conv4_weight, d_grad_up1,
+    launch_conv2d_input_grad_unroll(d_grad_conv4, d_conv4_weight, d_grad_up1,
                             128, 16, 16, 256, 16, 16, 3, 1, 1);
     
     // Upsample1 backward - scale_factor=2
@@ -353,7 +354,7 @@ void AutoencoderGPUOptimized2::backward() {
     
     launch_conv2d_bias_grad(d_grad_conv3, d_conv3_bias_grad, 128, 8, 8);
     
-    launch_conv2d_input_grad(d_grad_conv3, d_conv3_weight, d_grad_pool2,
+    launch_conv2d_input_grad_unroll(d_grad_conv3, d_conv3_weight, d_grad_pool2,
                             128, 8, 8, 128, 8, 8, 3, 1, 1);
     
     // MaxPool2 backward - pool_size=2, stride=2
@@ -368,7 +369,7 @@ void AutoencoderGPUOptimized2::backward() {
     
     launch_conv2d_bias_grad(d_grad_conv2, d_conv2_bias_grad, 128, 16, 16);
     
-    launch_conv2d_input_grad(d_grad_conv2, d_conv2_weight, d_grad_pool1,
+    launch_conv2d_input_grad_unroll(d_grad_conv2, d_conv2_weight, d_grad_pool1,
                             256, 16, 16, 128, 16, 16, 3, 1, 1);
     
     // MaxPool1 backward - pool_size=2, stride=2
