@@ -11,13 +11,20 @@ import argparse
 import numpy as np
 import time
 import struct
-from pathlib import Path
+import gc  # For aggressive RAM cleanup
 
-# cuML imports
+# cuML imports and confusion_matrix selection
 try:
     from cuml.svm import SVC
+    try:
+        from cuml.metrics import confusion_matrix
+        USE_CUML_CM = True
+    except ImportError:
+        from sklearn.metrics import confusion_matrix
+        USE_CUML_CM = False
     import cupy as cp
     CUML_AVAILABLE = True
+    print(f"cuML Available. Using GPU-accelerated Confusion Matrix: {USE_CUML_CM}")
 except ImportError:
     print("Warning: cuML not available. Please install cuML.")
     print("Install with: conda install -c rapidsai -c conda-forge cuml")
@@ -33,59 +40,48 @@ CLASS_NAMES = [
 
 def load_features(filepath):
     """
-    Load features from binary file.
+    Optimized: Read binary block directly into NumPy array (much faster than struct).
     Format: [num_images (int), feature_dim (int), features (floats)]
     """
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"Feature file not found: {filepath}")
-    
+
     with open(filepath, 'rb') as f:
-        # Read metadata
-        num_images = struct.unpack('i', f.read(4))[0]
-        feature_dim = struct.unpack('i', f.read(4))[0]
-        
-        # Read features
-        num_values = num_images * feature_dim
-        features = np.array(struct.unpack(f'{num_values}f', f.read(num_values * 4)))
+        header = f.read(8)
+        num_images = struct.unpack('i', header[:4])[0]
+        feature_dim = struct.unpack('i', header[4:8])[0]
+        features = np.fromfile(f, dtype=np.float32, count=num_images * feature_dim)
         features = features.reshape(num_images, feature_dim)
-    
+
     print(f"Loaded {filepath}:")
     print(f"  - Samples: {num_images}")
     print(f"  - Feature dimension: {feature_dim}")
-    
+
     return features, num_images, feature_dim
 
 
 def load_labels(data_dir, is_train=True):
     """
-    Load CIFAR-10 labels from binary files.
+    Load CIFAR-10 labels using seek to skip image data (faster than read).
     """
     labels = []
-    
     if is_train:
-        # Load all 5 training batches
         for i in range(1, 6):
             batch_file = os.path.join(data_dir, f"data_batch_{i}.bin")
             if not os.path.exists(batch_file):
                 raise FileNotFoundError(f"Training batch not found: {batch_file}")
-            
             with open(batch_file, 'rb') as f:
-                for _ in range(10000):  # Each batch has 10000 images
-                    label = struct.unpack('B', f.read(1))[0]
-                    f.read(3072)  # Skip image data (32x32x3)
-                    labels.append(label)
+                for _ in range(10000):
+                    labels.append(struct.unpack('B', f.read(1))[0])
+                    f.seek(3072, 1)  # Skip image data
     else:
-        # Load test batch
         test_file = os.path.join(data_dir, "test_batch.bin")
         if not os.path.exists(test_file):
             raise FileNotFoundError(f"Test batch not found: {test_file}")
-        
         with open(test_file, 'rb') as f:
-            for _ in range(10000):  # Test batch has 10000 images
-                label = struct.unpack('B', f.read(1))[0]
-                f.read(3072)  # Skip image data
-                labels.append(label)
-    
+            for _ in range(10000):
+                labels.append(struct.unpack('B', f.read(1))[0])
+                f.seek(3072, 1)
     return np.array(labels, dtype=np.int32)
 
 
@@ -120,112 +116,102 @@ def print_per_class_accuracy(cm, class_names):
             print(f"{name:>15}: N/A")
 
 
-def compute_confusion_matrix(y_true, y_pred, num_classes=10):
-    """Compute confusion matrix."""
-    cm = np.zeros((num_classes, num_classes), dtype=np.int32)
-    for i in range(len(y_true)):
-        cm[y_true[i], y_pred[i]] += 1
-    return cm
+
+def predict_in_batches(model, X_gpu, batch_size=4096):
+    """
+    Predict in batches to avoid VRAM OOM and reduce RAM usage.
+    """
+    num_samples = X_gpu.shape[0]
+    predictions = []
+    for i in range(0, num_samples, batch_size):
+        end_idx = min(i + batch_size, num_samples)
+        batch_X = X_gpu[i:end_idx]
+        batch_pred = model.predict(batch_X)
+        predictions.append(batch_pred)
+        del batch_X
+    if len(predictions) > 0:
+        if isinstance(predictions[0], cp.ndarray):
+            return cp.concatenate(predictions)
+        else:
+            return np.concatenate(predictions)
+    return np.array([])
 
 
 def train_and_evaluate_svm(train_features, train_labels, test_features, test_labels, 
                           C=1.0, kernel='rbf', gamma='scale', save_path=None):
-    """
-    Train SVM using cuML and evaluate on test set.
-    
-    Args:
-        train_features: Training features (numpy array)
-        train_labels: Training labels (numpy array)
-        test_features: Test features (numpy array)
-        test_labels: Test labels (numpy array)
-        C: Regularization parameter
-        kernel: Kernel type ('linear', 'poly', 'rbf', 'sigmoid')
-        gamma: Kernel coefficient ('scale' or 'auto' or float)
-        save_path: Path to save model (optional)
-    """
     print("\n=== Step 1: Preparing Data for GPU ===")
-    
-    # Convert to CuPy arrays for GPU processing
-    print("Transferring data to GPU...")
     start_transfer = time.time()
-    
+
+    # Move training data to GPU
+    print("Moving Training Data to GPU...")
     X_train_gpu = cp.asarray(train_features, dtype=cp.float32)
     y_train_gpu = cp.asarray(train_labels, dtype=cp.int32)
+    del train_features, train_labels
+    gc.collect()
+
+    # Move test data to GPU
+    print("Moving Test Data to GPU...")
     X_test_gpu = cp.asarray(test_features, dtype=cp.float32)
     y_test_gpu = cp.asarray(test_labels, dtype=cp.int32)
-    
+    del test_features, test_labels
+    gc.collect()
+
     transfer_time = time.time() - start_transfer
-    print(f"Data transfer time: {transfer_time:.4f} seconds")
-    
-    print(f"Training set shape: {X_train_gpu.shape}")
-    print(f"Test set shape: {X_test_gpu.shape}")
-    
+    print(f"Data transfer & Cleanup time: {transfer_time:.4f} seconds")
+    print(f"Training set shape (GPU): {X_train_gpu.shape}")
+
     # Initialize SVM
     print(f"\n=== Step 2: Training SVM ===")
-    print(f"Parameters:")
-    print(f"  - Kernel: {kernel}")
-    print(f"  - C: {C}")
-    print(f"  - Gamma: {gamma}")
-    
-    svm = SVC(
-        C=C,
-        kernel=kernel,
-        gamma=gamma,
-        cache_size=1024,  # Cache size in MB
-        max_iter=100,
-        tol=1e-3,
-        verbose=True
-    )
-    
-    # Train
-    print("\nTraining SVM on GPU...")
+    print(f"Kernel: {kernel}, C: {C}, Gamma: {gamma}")
+    svm = SVC(C=C, kernel=kernel, gamma=gamma, cache_size=2000, max_iter=100, tol=1e-3, verbose=True)
+
     train_start = time.time()
-    
     svm.fit(X_train_gpu, y_train_gpu)
-    
     train_time = time.time() - train_start
-    print(f"\nTraining completed in {train_time:.4f} seconds")
-    
-    # Evaluate on training set
-    print("\n=== Step 3: Evaluating on Training Set ===")
+    print(f"Training completed in {train_time:.4f} seconds")
+
+    # Evaluate on training set (batched)
+    print("\n=== Step 3: Evaluating on Training Set (Batched) ===")
     train_pred_start = time.time()
-    
-    train_predictions = svm.predict(X_train_gpu)
-    train_predictions_cpu = cp.asnumpy(train_predictions)
-    
+    train_predictions = predict_in_batches(svm, X_train_gpu, batch_size=4096)
+    if not isinstance(train_predictions, cp.ndarray):
+        train_predictions = cp.asarray(train_predictions)
+    train_accuracy = cp.mean(train_predictions == y_train_gpu) * 100
     train_pred_time = time.time() - train_pred_start
-    
-    train_accuracy = np.mean(train_predictions_cpu == train_labels) * 100
     print(f"Training accuracy: {train_accuracy:.2f}%")
     print(f"Training prediction time: {train_pred_time:.4f} seconds")
-    
-    # Evaluate on test set
-    print("\n=== Step 4: Evaluating on Test Set ===")
+
+    # Evaluate on test set (batched)
+    print("\n=== Step 4: Evaluating on Test Set (Batched) ===")
     test_pred_start = time.time()
-    
-    test_predictions = svm.predict(X_test_gpu)
-    test_predictions_cpu = cp.asnumpy(test_predictions)
-    
+    test_predictions = predict_in_batches(svm, X_test_gpu, batch_size=4096)
+    if not isinstance(test_predictions, cp.ndarray):
+        test_predictions = cp.asarray(test_predictions)
+    test_accuracy = cp.mean(test_predictions == y_test_gpu) * 100
     test_pred_time = time.time() - test_pred_start
-    
-    test_accuracy = np.mean(test_predictions_cpu == test_labels) * 100
     print(f"Test accuracy: {test_accuracy:.2f}%")
     print(f"Test prediction time: {test_pred_time:.4f} seconds")
-    
-    # Confusion matrix
-    cm = compute_confusion_matrix(test_labels, test_predictions_cpu)
+
+    # Confusion Matrix
+    print("\n=== Computing Confusion Matrix ===")
+    if USE_CUML_CM:
+        cm_gpu = confusion_matrix(y_test_gpu, test_predictions)
+        cm = cp.asnumpy(cm_gpu)
+    else:
+        y_test_cpu = cp.asnumpy(y_test_gpu)
+        test_pred_cpu = cp.asnumpy(test_predictions)
+        cm = confusion_matrix(y_test_cpu, test_pred_cpu)
     print_confusion_matrix(cm, CLASS_NAMES)
     print_per_class_accuracy(cm, CLASS_NAMES)
-    
+
     # Save model if requested
     if save_path:
         print(f"\n=== Saving Model ===")
-        # Note: cuML models can be saved using pickle or joblib
         import pickle
         with open(save_path, 'wb') as f:
             pickle.dump(svm, f)
         print(f"Model saved to: {save_path}")
-    
+
     # Summary
     print("\n" + "=" * 50)
     print("=== SUMMARY ===")
@@ -238,8 +224,8 @@ def train_and_evaluate_svm(train_features, train_labels, test_features, test_lab
     print(f"\nTraining accuracy:        {train_accuracy:.2f}%")
     print(f"Test accuracy:            {test_accuracy:.2f}%")
     print("=" * 50)
-    
-    return svm, test_accuracy
+
+    return svm, float(test_accuracy)
 
 
 def main():
