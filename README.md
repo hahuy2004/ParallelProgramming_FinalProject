@@ -126,9 +126,12 @@ ParallelProgramming_FinalProject/
   - L4: Thiết lập compute capability == 8.6 (-arch=sm_86)
   - A100: Thiết lập compute capability == 8.0 (-arch=sm_80)
 
-#### Cài đặt dependencies: Cần cài đặt thư viện cuML. Tuy nhiên, Google Colab đã tải thư viện này nên không phải thực hiện cài đặt
+#### Cài đặt dependencies
+- Dự án sử dụng thư viện **cuML** để huấn luyện mô hình SVM trên GPU.
+- Khi triển khai trên môi trường **Google Colab**, cuML đã được tích hợp sẵn trong hệ thống, vì vậy không yêu cầu cài đặt bổ sung.
 
-### Tải CIFAR-10 dataset
+
+#### Tải CIFAR-10 dataset
 ```
 %cd /content/ParallelProgramming_FinalProject
 !wget https://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz
@@ -222,10 +225,10 @@ Dựa trên kết quả huấn luyện Autoencoderqua các phase khác nhau (m�
 
 | Phase | Training Time (s) | Speedup (vs CPU) | Incremental Speedup | Memory Usage | Key Optimization | Note |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **CPU Baseline** | 2211000s | 1.0$\times$ | - | - | - | Giá trị ước tính |
-| **GPU Basic** | 4364.2s | 506.62$\times$ | 506.62$\times$ | 0.6 GB | Parallelization | - |
-| **GPU Opt v1** | 4081.53s | 541.71$\times$ | 1.07$\times$ | 0.7 GB | Shared memory | - |
-| **GPU Opt v2** | 4134.89s | 534.72$\times$ | 0.987$\times$ | 0.7 GB | Kernel Fusion + Unroll loop | - |
+| **CPU Baseline** | 2211000s | 1.0x | - | - | - | Giá trị ước tính |
+| **GPU Basic** | 4364.2s | 506.62x | 506.62x | 0.6 GB | Parallelization | - |
+| **GPU Opt v1** | 4081.53s | 541.71x | 1.07x | 0.7 GB | Shared memory | - |
+| **GPU Opt v2** | 4134.89s | 534.72x | 0.987x | 0.7 GB | Kernel Fusion + Unroll loop | - |
 
 ### 5.2. Kết quả phân loại SVM:
 
@@ -248,7 +251,7 @@ Test accuracy:            61.13%
           truck:  68.20%
 ```
 
---
+---
 
 ## 6. Tham khảo
 
