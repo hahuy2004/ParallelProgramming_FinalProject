@@ -49,7 +49,7 @@ ParallelProgramming_FinalProject/
 │   ├── phase2                   		# Naive GPU
 │   ├── phase3_1                 		# Optimized 1 GPU
 │   ├── phase3_2                 		# Optimized 2 GPU
-│   ├── phase4_extract_features  		# Extract feature for SVM
+│   ├── phase4_extract_features  		# Extract feature cho SVM
 │   └── ...
 │
 ├── cifar-10-batches-bin/        		# CIFAR-10 dataset (binary)
