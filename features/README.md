@@ -1,4 +1,4 @@
-## Cấu trúc thư mục./features/
+## Cấu trúc thư mục ./features/
 
 ```
 ├── features/                     		# Thư mục chứa các feature được trích xuất

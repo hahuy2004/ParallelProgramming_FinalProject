@@ -1,4 +1,4 @@
-## Cấu trúc thư mục./build/
+## Cấu trúc thư mục ./build/
 
 ```
 ├── build/                       		# Thư mục chứa các file được biên dịch

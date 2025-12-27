@@ -1,4 +1,4 @@
-## Cấu trúc thư mục./weights/
+## Cấu trúc thư mục ./weights/
 
 ```
 └── weights/                      		# Model weights (autoencoder + SVM)
