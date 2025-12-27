@@ -1,15 +1,25 @@
 # CIFAR-10 Autoencoder + SVM với CUDA
 
-**Đồ án cuối kỳ - Lập trình Song song (CSC14120)**
+---
 
-## 📋 Tổng quan
+## 1. Tổng quan
 
-Dự án implement Convolutional Autoencoder với CUDA để:
+Đây là đồ án cuối kỳ môn Lập trình song song (CSC14120) - Khoa Công nghệ Thông tin - Trường Đại học Khoa học Tự nhiên - Đại học Quốc gia TP.HCM
+
+Dự án cài đặt Convolutional Autoencoder với CUDA để:
 1. Extract features từ CIFAR-10 dataset (60K ảnh 32×32×3)
 2. Train SVM classifier trên features đã extract
 3. Tối ưu hóa với GPU để đạt speedup >20×
 
-### Kiến trúc Autoencoder
+---
+
+## 2. Kiến trúc Autoencoder:
+
+**Tổng quan:**
+```
+INPUT: (32, 32, 3) → ENCODER (compress) → Latent: (8, 8, 128) = 8,192 
+features → DECODER (reconstruct) → OUTPUT: (32, 32, 3) 
+```
 
 **Encoder:**
 ```
@@ -26,23 +36,51 @@ Latent (8×8×128) → Conv2D(128) + ReLU → Upsample → (16×16×128)
 
 ---
 
-## 📂 Cấu trúc thư mục
+## 3. Cấu trúc thư mục đầy đủ:
 
 ```
-Project/
-├── README.md                    # ← File này
-├── notebook.ipynb               # ← Notebook duy nhất để chạy mọi thứ
-├── run_pipeline.py              # Python wrapper
+ParallelProgramming_FinalProject/
+├── README.md                    		# ← File này
+├── Project_Report.ipynb               	# Notebook để thực thi code
+├── CSC14120_2025_Final Project.pdf 	# Mô tả yêu cầu đồ án cuối kỳ
 │
-├── cifar-10-batches-bin/       # CIFAR-10 dataset (binary)
+├── build/                       		# Thư mục chứa các file được biên dịch
+│   ├── phase1                   		# CPU baseline
+│   ├── phase2                   		# Naive GPU
+│   ├── phase3_1                 		# Optimized 1 GPU
+│   ├── phase3_2                 		# Optimized 2 GPU
+│   ├── phase4_extract_features  		# Extract feature for SVM
+│   └── ...
+│
+├── cifar-10-batches-bin/        		# CIFAR-10 dataset (binary)
 │   ├── data_batch_1.bin
 │   ├── data_batch_2.bin
 │   ├── data_batch_3.bin
 │   ├── data_batch_4.bin
 │   ├── data_batch_5.bin
-│   └── test_batch.bin
+│   ├── test_batch.bin
+│   └── ...
 │
-├── include/                     # Header files
+├── cuda/                         		# CUDA kernels
+│   ├── gpu_kernels_naive.h
+│   ├── gpu_kernels_naive.cu
+│   ├── gpu_kernels_optimized_1.h
+│   ├── gpu_kernels_optimized_1.cu
+│   ├── gpu_kernels_optimized_2.h
+│   └── gpu_kernels_optimized_2.cu
+│
+├── features/                     		# Thư mục chứa các feature được trích xuất
+│   ├── cpu
+│   │   ├── train_features.bin
+│   │   └── test_features.bin
+│   ├── gpu_naive
+│   │   └── ...
+│   ├── gpu_optimized_1
+│   │   └── ...
+│   ├── gpu_optimized_2
+│   │   └── ...
+│
+├── include/                      		# Header files
 │   ├── cifar10_loader.h
 │   ├── autoencoder_cpu.h
 │   ├── autoencoder_gpu.h
@@ -50,498 +88,172 @@ Project/
 │   ├── autoencoder_gpu_optimized_2.h
 │   └── svm_classifier.h
 │
-├── src/                        # Source code
-│   ├── cifar10_loader.cpp
-│   ├── autoencoder_cpu.cpp
+├── src/                          		# Source code
+│   ├── cifar10_loader.cu
+│   ├── reconstruct.cu
+│   ├── autoencoder_cpu.cu
 │   ├── autoencoder_gpu.cu
 │   ├── autoencoder_gpu_optimized_1.cu
 │   ├── autoencoder_gpu_optimized_2.cu
-│   ├── svm_classifier.cpp
-│   ├── main_phase1.cpp
-│   ├── main_phase2.cpp
-│   ├── main_phase3.cpp
-│   └── main_phase4.cpp
+│   ├── main_phase1.cu
+│   ├── main_phase2.cu
+│   ├── main_phase3_1.cu
+│   ├── main_phase3_1.cu
+│   ├── main_phase4_extract_features.cu
+│   └── main_phase4_svm.py
 │
-├── cuda/                       # CUDA kernels
-│   ├── gpu_kernels.h
-│   ├── gpu_kernels.cu
-│   ├── gpu_kernels_optimized_1.h
-│   └── gpu_kernels_optimized_1.cu
-│   ├── gpu_kernels_optimized_2.h
-│   └── gpu_kernels_optimized_2.cu
-│
-├── Makefile                    # Build system
-├── CMakeLists.txt             # Alternative build (CMake)
-│
-├── build/                      # Compiled binaries (generated)
-│   ├── phase1                 # CPU baseline
-│   ├── phase2                 # Naive GPU
-│   ├── phase3                 # Optimized GPU
-│   └── phase4                 # Full pipeline with SVM
-│
-├── weights/                    # Model weights (generated)
-│   ├── autoencoder_cpu.weights
-│   ├── autoencoder_gpu.weights
-│   └── autoencoder_gpu_optimized_1.weights
-│   └── autoencoder_gpu_optimized_2.weights
-│
-└── third_party/               # External libraries
-    └── libsvm/                # SVM library
+└── weights/                      		# Model weights (autoencoder + SVM)
+    ├── autoencoder_cpu.bin
+    ├── autoencoder_gpu_naive.bin
+    ├── autoencoder_gpu_optimized_1.bin
+    ├── autoencoder_gpu_optimized_2.bin
+    └── svm_cuml.pkl
+
 ```
 
 ---
 
-## 🚀 Quick Start
+## 4. Thực thi chương trình:
 
-### 1. Setup môi trường
+**Lưu ý:** Các lệnh dưới đây được cấu hình và kiểm thử trên môi trường Google Colab với GPU NVIDIA Tesla T4 (Compute Capability 7.5). Khi chạy trên môi trường hoặc GPU khác, cần điều chỉnh lại các tham số biên dịch (ví dụ: -arch=sm_75 với T4) cho phù hợp với compute capability của GPU tương ứng.
+
+### 4.1. Setup môi trường:
 
 #### Yêu cầu:
 - **CUDA:** >= 11.0 (check: `nvcc --version`)
-- **GPU:** NVIDIA với compute capability >= 7.5
-- **Compiler:** g++ >= 7.0
-- **Python:** >= 3.7 (nếu dùng notebook)
+- **GPU:** Sử dụng GPU trên Google Colab
+  - T4: Thiết lập compute capability == 7.5 (-arch=sm_75)
+  - L4: Thiết lập compute capability == 8.6 (-arch=sm_86)
+  - A100: Thiết lập compute capability == 8.0 (-arch=sm_80)
 
-#### Cài đặt dependencies:
-```bash
-# Clone và build LIBSVM
-cd third_party
-git clone https://github.com/cjlin1/libsvm.git
-cd libsvm
-make
-cd ../..
+#### Cài đặt dependencies: Cần cài đặt thư viện cuML. Tuy nhiên, Google Colab đã tải thư viện này nên không phải thực hiện cài đặt
+
+### Tải CIFAR-10 dataset
+```
+%cd /content/ParallelProgramming_FinalProject
+!wget https://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz
+!tar -xzf cifar-10-binary.tar.gz
 ```
 
-### 2. Download CIFAR-10 dataset
+### 4.2. Compile các module
 
-```bash
-# Download
-wget https://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz
+```
+# File load dữ liệu
+!nvcc -c -arch=sm_75 src/cifar10_loader.cu -o build/cifar10_loader.o
 
-# Extract
-tar -xzf cifar-10-binary.tar.gz
+# Autoencoder của CPU
+!nvcc -c -arch=sm_75 src/autoencoder_cpu.cu -o build/autoencoder_cpu.o
 
-# Đảm bảo có thư mục cifar-10-batches-bin/
+# Autoencoder của GPU
+!nvcc -c -arch=sm_75 cuda/gpu_kernels_naive.cu -o build/gpu_kernels_naive.o
+!nvcc -c -arch=sm_75 src/autoencoder_gpu.cu -o build/autoencoder_gpu.o
+
+# Autoencoder của GPU phiên bản Memory Optimization
+!nvcc -c -arch=sm_75 cuda/gpu_kernels_optimized_1.cu -o build/gpu_kernels_optimized_1.o
+!nvcc -c -arch=sm_75 src/autoencoder_gpu_optimized_1.cu -o build/autoencoder_gpu_optimized_1.o
+
+# Autoencoder của GPU phiên bản Kernel-block Optimization
+!nvcc -c -arch=sm_75 cuda/gpu_kernels_optimized_2.cu -o build/gpu_kernels_optimized_2.o
+!nvcc -c -arch=sm_75 src/autoencoder_gpu_optimized_2.cu -o build/autoencoder_gpu_optimized_2.o
+
+# Biên dịch phase 1: CPU
+!nvcc -arch=sm_75 src/main_phase1.cu build/cifar10_loader.o build/autoencoder_cpu.o -o build/phase1
+
+# Biên dịch phase 2: Naive GPU
+!nvcc -arch=sm_75 src/main_phase2.cu build/cifar10_loader.o build/autoencoder_gpu.o build/gpu_kernels_naive.o -o build/phase2
+
+# Biên dịch phase 3.1: Optimized 1 GPU
+!nvcc -arch=sm_75 src/main_phase3_1.cu build/cifar10_loader.o build/autoencoder_gpu_optimized_1.o build/gpu_kernels_naive.o build/gpu_kernels_optimized_1.o -o build/phase3_1
+
+# Biên dịch phase 3.2: Optimized 2 GPU
+!nvcc -arch=sm_75 src/main_phase3_2.cu build/cifar10_loader.o build/autoencoder_gpu_optimized_2.o build/gpu_kernels_naive.o build/gpu_kernels_optimized_2.o -o build/phase3_2
+
+# Biên dịch phase 4_extract_features
+!nvcc -arch=sm_75 src/main_phase4_extract_features.cu build/cifar10_loader.o build/autoencoder_cpu.o build/autoencoder_gpu.o build/autoencoder_gpu_optimized_1.o build/autoencoder_gpu_optimized_2.o build/gpu_kernels_naive.o build/gpu_kernels_optimized_1.o build/gpu_kernels_optimized_2.o -o build/phase4_extract_features
+
+# Biên dịch reconstruct
+!nvcc -arch=sm_75 src/reconstruct.cu \
+    build/cifar10_loader.o \
+    build/autoencoder_cpu.o \
+    build/autoencoder_gpu.o \
+    build/gpu_kernels_naive.o \
+    build/autoencoder_gpu_optimized_1.o \
+    build/autoencoder_gpu_optimized_2.o \
+    build/gpu_kernels_optimized_1.o \
+    build/gpu_kernels_optimized_2.o \
+    -o build/reconstruct
 ```
 
-### 3. Compile project
-
-```bash
-# Compile tất cả phases
-make all
-
-# Hoặc compile từng phase
-make phase1  # CPU baseline
-make phase2  # Naive GPU
-make phase3  # Optimized GPU
-make phase4  # Full pipeline with SVM
-```
-
-**Lưu ý:** Điều chỉnh CUDA architecture trong Makefile nếu cần:
-```makefile
-CUDA_ARCH = -arch=sm_75  # RTX 2080, T4
-# sm_80: A100
-# sm_86: RTX 3090
-```
-
-### 4. Run
+### 4.3. Build các phase
 
 ```bash
 # Phase 1: CPU Baseline
 ./build/phase1
+!./build/reconstruct cpu 10
+
 
 # Phase 2: Naive GPU
 ./build/phase2
+!./build/reconstruct gpu_naive 10
 
-# Phase 3: Optimized GPU  
-./build/phase3
+# Phase 3.1: Optimized 1 GPU  
+!./build/phase3_1
+!./build/reconstruct gpu_opt1 10
 
-# Phase 4: SVM Classification
-./build/phase4
+# Phase 3.2: Optimized 1 GPU  
+!./build/phase3_2
+!./build/reconstruct gpu_opt2 10
+
+# Phase 4_extract_features
+# Có thể đổi thành các giá trị --mode là: cpu, gpu_naive, gpu_optimized_1, gpu_optimized_2
+!./build/phase4_extract_features --mode gpu_naive
+
+# Phase 4_SVM: Chạy trong file Project_Report.ipynb trên Google Colab
+
 ```
 
 ---
 
-## 📊 4 Phases Implementation
+## 5. Kết quả đạt được
 
-### Phase 1: CPU Baseline (Sanity Check)
-- **File:** `src/autoencoder_cpu.cu`, `src/main_phase1.cu`
-- **Mục đích:** Sanity check + Benchmark baseline
-- **Configuration:**
-  - **Training:** 50,000 images (full dataset), 1 epoch
-  - **Purpose:** 
-    - ✅ Sanity check: Đảm bảo code không crash, tính toán đúng (no NaN/Inf)
-    - ✅ Benchmarking: Đo thời gian để ước lượng full training (20 epochs)
-  - **Fast test mode:** Uncomment dòng code để chỉ dùng 300 ảnh test nhanh
-- **Features:** 
-  - Pure C++ implementation
-  - Nested loops cho convolution
-  - Simplified backward pass
-- **Expected time:** 
-  - Full dataset (50,000 images, 1 epoch): ~90 minutes
-  - Fast test (300 images, 1 epoch): ~30 seconds
+### 5.1. Hiệu năng huấn luyện Autoencoder:
 
-### Phase 2: Naive GPU (Full Training)
-- **Files:** `src/autoencoder_gpu.cu`, `cuda/gpu_kernels.cu`
-- **Mục đích:** GPU implementation đơn giản
-- **Configuration:**
-  - **Training:** 50,000 images, 20 epochs (FULL)
-  - **Batch size:** 64
-- **Features:**
-  - Basic CUDA kernels
-  - Sequential kernel launches
-  - Standard memory transfers
-- **Expected speedup:** 6-10× vs CPU
+Dựa trên kết quả huấn luyện Autoencoderqua các phase khác nhau (mỗi phase huấn luyện 10 epoch trên GPU), bảng dưới đây tổng hợp đầy đủ các số liệu thực nghiệm thu được:
 
-### Phase 3: Optimized GPU (Full Training)
-- **Files:** `src/autoencoder_gpu_optimized.cu`, `cuda/gpu_kernels_optimized.cu`
-- **Configuration:**
-  - **Training:** 50,000 images, 20 epochs (FULL)
-  - **Batch size:** 128 (tối ưu GPU utilization)
-- **Optimizations:**
-  - ✅ **Kernel fusion:** Conv2D + ReLU trong 1 kernel
-  - ✅ **Pinned memory:** Faster CPU↔GPU transfers
-  - ✅ **Async transfers:** Overlap computation
-  - ✅ **Larger batch size:** Better GPU utilization
-  - 🔧 **Shared memory tiling:** Template provided (cho future)
-- **Expected speedup:** 15-25× vs CPU, ~2× vs Naive GPU
+| Phase | Training Time (s) | Speedup (vs CPU) | Incremental Speedup | Memory Usage | Key Optimization | Note |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **CPU Baseline** | 2211000s | 1.0$\times$ | - | - | - | Giá trị ước tính |
+| **GPU Basic** | 4364.2s | 506.62$\times$ | 506.62$\times$ | 0.6 GB | Parallelization | - |
+| **GPU Opt v1** | 4081.53s | 541.71$\times$ | 1.07$\times$ | 0.7 GB | Shared memory | - |
+| **GPU Opt v2** | 4134.89s | 534.72$\times$ | 0.987$\times$ | 0.7 GB | Kernel Fusion + Unroll loop | - |
 
-### Phase 4: SVM Classification (Full Pipeline)
-- **Files:** `src/main_phase4.cu`, `src/svm_classifier.cu`
-- **Configuration:**
-  - **Training:** 50,000 images (full dataset)
-  - **Test:** 10,000 images
-- **Pipeline:**
-  1. Load trained autoencoder weights
-  2. Extract features (8192-D) từ 60K images
-  3. Train SVM với RBF kernel
-  4. Evaluate trên test set
-- **Expected accuracy:** 60-65%
+### 5.2. Kết quả phân loại SVM:
 
----
+Kết quả khi train SVM như sau:
+```
+=== SUMMARY ===
+Training accuracy:        65.53%
+Test accuracy:            61.13%
 
-## 🐍 Chạy từ Python/Jupyter
-
-### Setup Python wrapper
-
-```python
-from run_pipeline import CIFARAutoencoderPipeline
-
-pipeline = CIFARAutoencoderPipeline()
-
-# Check môi trường
-pipeline.check_setup()
-
-# Compile
-pipeline.compile_all()
-
-# Run phases
-result1 = pipeline.run_phase1_cpu()
-result2 = pipeline.run_phase2_gpu()
-result3 = pipeline.run_phase3_optimized()
-result4 = pipeline.run_phase4_svm()
-
-# Compare
-print(f"CPU: {result1['time']:.2f}s")
-print(f"Optimized GPU: {result3['time']:.2f}s")
-print(f"Speedup: {result1['time'] / result3['time']:.2f}×")
+=== Per-Class Accuracy ===
+       airplane:  64.00%
+     automobile:  71.60%
+           bird:  45.90%
+            cat:  48.30%
+           deer:  52.50%
+            dog:  47.90%
+           frog:  73.90%
+          horse:  64.10%
+           ship:  74.90%
+          truck:  68.20%
 ```
 
-### Command line
+--
 
-```bash
-python run_pipeline.py check     # Kiểm tra setup
-python run_pipeline.py compile   # Compile all
-python run_pipeline.py phase3    # Run Phase 3
-python run_pipeline.py all       # Run toàn bộ pipeline
-python run_pipeline.py profile   # Profile với nsys
-```
-
-### Jupyter Notebook
-
-Mở file `notebook.ipynb` - tích hợp đầy đủ:
-- Setup & compilation
-- Run từng phase
-- Visualize kết quả
-- So sánh performance
-- Report template
-
----
-
-## 🌐 Google Colab
-
-### Setup trên Colab
-
-```python
-# 1. Check GPU
-!nvidia-smi
-
-# 2. Clone project
-!git clone <your-repo-url>
-%cd Project
-
-# 3. Install LIBSVM
-!cd third_party && git clone https://github.com/cjlin1/libsvm.git && cd libsvm && make
-
-# 4. Download CIFAR-10
-!wget https://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz
-!tar -xzf cifar-10-binary.tar.gz
-
-# 5. Compile
-!make all
-
-# 6. Run
-!./build/phase3
-```
-
-### Sử dụng notebook.ipynb trên Colab
-
-1. Upload `notebook.ipynb` lên Google Drive
-2. Mở bằng Google Colab
-3. Runtime → Change runtime type → GPU (T4)
-4. Run từng cell
-
----
-
-## 🎯 Performance Targets
-
-| Metric | Target | 
-|--------|--------|
-| Training time | < 10 phút (600s) |
-| Feature extraction | < 20s cho 60K images |
-| Speedup (Phase 3 vs CPU) | > 20× |
-| Test accuracy | 60-65% |
-
----
-
-## 🎓 Kỹ thuật tối ưu hóa (Phase 3)
-
-### 1. Kernel Fusion
-**Problem:** Mỗi kernel có overhead (launch + sync)
-**Solution:** Merge Conv2D + ReLU thành 1 kernel
-
-```cpp
-// Before: 2 kernels
-conv2d_kernel<<<grid, block>>>(input, temp, weights, bias);
-relu_kernel<<<grid, block>>>(temp, output);
-
-// After: 1 fused kernel  
-conv2d_relu_kernel<<<grid, block>>>(input, output, weights, bias);
-```
-
-**Benefit:** Giảm 50% memory traffic, 15-20% faster
-
-### 2. Pinned Memory
-**Problem:** Pageable memory → slow CPU↔GPU transfer
-**Solution:** Pinned (page-locked) memory
-
-```cpp
-// Before
-float* h_data = new float[size];
-cudaMemcpy(d_data, h_data, size, cudaMemcpyHostToDevice);
-
-// After
-float* h_pinned;
-cudaMallocHost(&h_pinned, size);  // Pinned memory
-cudaMemcpyAsync(d_data, h_pinned, size, cudaMemcpyHostToDevice);
-```
-
-**Benefit:** 2× faster transfer
-
-### 3. Async Transfers
-**Problem:** Transfer blocking computation
-**Solution:** Overlap transfer & computation
-
-```cpp
-cudaMemcpyAsync(d_input, h_input, size, ..., stream);
-kernel<<<grid, block, 0, stream>>>(...);  // Run while transferring
-```
-
-**Benefit:** Hide transfer latency
-
-### 4. Larger Batch Size
-**Problem:** Small batches → low GPU utilization
-**Solution:** Increase batch size 64 → 128
-
-**Benefit:** Better occupancy, 10-15% faster
-
----
-
-## 🔧 Troubleshooting
-
-### Compilation errors
-
-**CUDA not found:**
-```bash
-export PATH=/usr/local/cuda/bin:$PATH
-export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
-```
-
-**Wrong GPU architecture:**
-```bash
-# Check GPU compute capability
-nvidia-smi --query-gpu=compute_cap --format=csv
-
-# Update Makefile
-CUDA_ARCH = -arch=sm_XX  # Replace XX
-```
-
-### Runtime errors
-
-**Out of memory:**
-- Giảm batch size trong source code
-- Phase 2/3: Sửa `int batch_size = 64` → `32`
-
-**LIBSVM not found:**
-```bash
-cd third_party
-git clone https://github.com/cjlin1/libsvm.git
-cd libsvm && make
-```
-
-**CIFAR-10 dataset not found:**
-```bash
-wget https://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz
-tar -xzf cifar-10-binary.tar.gz
-```
-
----
-
-## 📈 Profiling
-
-### NVIDIA Nsight Systems
-
-```bash
-# Profile Phase 3
-nsys profile --output=phase3_profile ./build/phase3
-
-# View results
-nsys-ui phase3_profile.nsys-rep
-```
-
-### NVIDIA Nsight Compute
-
-```bash
-# Detailed kernel analysis
-ncu --set full --export phase3_kernel ./build/phase3
-
-# View
-ncu-ui phase3_kernel.ncu-rep
-```
-
----
-
-## 📝 Report Template
-
-### Nội dung báo cáo
-
-1. **Giới thiệu**
-   - Mô tả đề bài
-   - Kiến trúc Autoencoder
-   - Mục tiêu performance
-
-2. **Implementation**
-   - Phase 1: CPU Baseline
-   - Phase 2: Naive GPU
-   - Phase 3: Optimized GPU (chi tiết optimizations)
-   - Phase 4: SVM Classification
-
-3. **Results**
-   - Bảng so sánh timing
-   - Biểu đồ speedup
-   - Confusion matrix
-   - Per-class accuracy
-
-4. **Analysis**
-   - Profiling results (nsys/ncu)
-   - Bottleneck analysis
-   - Optimization effectiveness
-
-5. **Conclusion**
-   - Thành tựu đạt được
-   - Hạn chế
-   - Future work
-
-### Video Demo (15-20 phút)
-
-1. Giới thiệu đề bài (2 phút)
-2. Demo compilation & execution (3 phút)
-3. Giải thích code chính (5 phút)
-4. So sánh kết quả (3 phút)
-5. Phân tích optimizations (4 phút)
-6. Kết luận (1 phút)
-
----
-
-## 📖 API Reference
-
-### CIFAR10Loader
-```cpp
-Cifar10Loader loader("cifar-10-batches-bin");
-loader.load();  // Load tất cả data
-
-auto& train_images = loader.get_train_images();  // 50000 × 3072
-auto& test_images = loader.get_test_images();    // 10000 × 3072
-```
-
-### AutoencoderCPU
-```cpp
-AutoencoderCPU model;
-model.train(train_images, num_images, batch_size, epochs, lr);
-model.extract_features(images, num_images, features);  // → 8192-D
-model.save_weights("path/to/weights");
-```
-
-### AutoencoderGPU / AutoencoderGPUOptimized
-```cpp
-AutoencoderGPU model;  // hoặc AutoencoderGPUOptimized
-model.train(train_images, num_images, batch_size, epochs, lr);
-model.extract_features(images, num_images, features);
-```
-
-### SVMClassifier
-```cpp
-SVMClassifier svm;
-svm.train(train_features, train_labels, num_train);
-float accuracy = svm.predict(test_features, test_labels, num_test);
-svm.save_model("svm_model.txt");
-```
-
----
-
-## 🤝 Contributing
-
-Nếu muốn mở rộng project:
-
-1. **Phase 3 improvements:**
-   - Implement shared memory tiling (template đã có)
-   - Multi-stream execution
-   - Mixed precision (FP16)
-
-2. **Architecture variants:**
-   - Try deeper networks
-   - ResNet-style skip connections
-   - Different latent dimensions
-
-3. **Other optimizations:**
-   - cuDNN library integration
-   - Dynamic batch sizing
-   - Gradient checkpointing
-
----
-
-## 📚 References
+## 6. Tham khảo
 
 - [CIFAR-10 Dataset](https://www.cs.toronto.edu/~kriz/cifar.html)
 - [CUDA C Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/)
 - [LIBSVM](https://www.csie.ntu.edu.tw/~cjlin/libsvm/)
 - [NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems)
-
----
-
-## 📄 License
-
-Educational project for CSC14120 - Parallel Programming Course
-
----
-
-**Good luck! 🚀**
+- [cuML SVM Documentation](https://docs.rapids.ai/api/cuml/stable/api/)
