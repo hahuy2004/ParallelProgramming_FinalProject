@@ -59,7 +59,7 @@ ParallelProgramming_FinalProject/
 │   ├── phase4_extract_features  		    # Extract feature cho SVM
 │   └── ...
 │
-├── cifar-10-batches-bin/        		    # CIFAR-10 dataset (binary)
+├── cifar-10-batches-bin/        		    # CIFAR-10 dataset (dạng binary)
 │   ├── data_batch_1.bin
 │   ├── data_batch_2.bin
 │   ├── data_batch_3.bin
