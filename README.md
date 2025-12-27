@@ -2,7 +2,7 @@
 
 ---
 
-## 1. Tổng quan
+## 1. Tổng quan:
 
 Đây là đồ án cuối kỳ môn Lập trình song song (CSC14120) - Khoa Công nghệ Thông tin - Trường Đại học Khoa học Tự nhiên - Đại học Quốc gia TP.HCM
 
@@ -138,7 +138,7 @@ ParallelProgramming_FinalProject/
 !tar -xzf cifar-10-binary.tar.gz
 ```
 
-### 4.2. Compile các module
+### 4.2. Compile các module:
 
 ```
 # File load dữ liệu
@@ -187,7 +187,7 @@ ParallelProgramming_FinalProject/
     -o build/reconstruct
 ```
 
-### 4.3. Build các phase
+### 4.3. Build các phase:
 
 ```bash
 # Phase 1: CPU Baseline
@@ -217,7 +217,7 @@ ParallelProgramming_FinalProject/
 
 ---
 
-## 5. Kết quả đạt được
+## 5. Kết quả đạt được:
 
 ### 5.1. Hiệu năng huấn luyện Autoencoder:
 
@@ -253,7 +253,7 @@ Test accuracy:            61.13%
 
 ---
 
-## 6. Tham khảo
+## 6. Tham khảo:
 
 - [CIFAR-10 Dataset](https://www.cs.toronto.edu/~kriz/cifar.html)
 - [CUDA C Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/)
