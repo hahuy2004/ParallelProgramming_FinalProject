@@ -106,13 +106,14 @@ ParallelProgramming_FinalProject/
 │   ├── main_phase4_extract_features.cu
 │   └── main_phase4_svm.py
 │
-└── weights/                      		  # Model weights (autoencoder + SVM)
-    ├── autoencoder_cpu.bin
-    ├── autoencoder_gpu_naive.bin
-    ├── autoencoder_gpu_optimized_1.bin
-    ├── autoencoder_gpu_optimized_2.bin
-    └── svm_cuml.pkl
-
+├── weights/                      		  # Model weights (autoencoder + SVM)
+│   ├── autoencoder_cpu.bin
+│   ├── autoencoder_gpu_naive.bin
+│   ├── autoencoder_gpu_optimized_1.bin
+│   ├── autoencoder_gpu_optimized_2.bin
+│   └── svm_cuml.pkl
+│
+└── results/                     		    # Thư mục chứa kết quả reconstructed
 ```
 
 ---
