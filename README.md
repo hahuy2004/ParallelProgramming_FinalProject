@@ -40,19 +40,19 @@ Latent (8×8×128) → Conv2D(128) + ReLU → Upsample → (16×16×128)
 
 ```
 ParallelProgramming_FinalProject/
-├── README.md                    		# ← File này
+├── README.md                    		    # ← File này
 ├── Project_Report.ipynb               	# Notebook để thực thi code
-├── CSC14120_2025_Final Project.pdf 	# Mô tả yêu cầu đồ án cuối kỳ
+├── CSC14120_2025_Final Project.pdf 	  # Mô tả yêu cầu đồ án cuối kỳ
 │
-├── build/                       		# Thư mục chứa các file được biên dịch
-│   ├── phase1                   		# CPU baseline
-│   ├── phase2                   		# Naive GPU
-│   ├── phase3_1                 		# Optimized 1 GPU
-│   ├── phase3_2                 		# Optimized 2 GPU
-│   ├── phase4_extract_features  		# Extract feature cho SVM
+├── build/                       		    # Thư mục chứa các file được biên dịch
+│   ├── phase1                   		    # CPU baseline
+│   ├── phase2                   		    # Naive GPU
+│   ├── phase3_1                 		    # Optimized 1 GPU
+│   ├── phase3_2                 		    # Optimized 2 GPU
+│   ├── phase4_extract_features  		    # Extract feature cho SVM
 │   └── ...
 │
-├── cifar-10-batches-bin/        		# CIFAR-10 dataset (binary)
+├── cifar-10-batches-bin/        		    # CIFAR-10 dataset (binary)
 │   ├── data_batch_1.bin
 │   ├── data_batch_2.bin
 │   ├── data_batch_3.bin
@@ -61,7 +61,7 @@ ParallelProgramming_FinalProject/
 │   ├── test_batch.bin
 │   └── ...
 │
-├── cuda/                         		# CUDA kernels
+├── cuda/                         		  # CUDA kernels
 │   ├── gpu_kernels_naive.h
 │   ├── gpu_kernels_naive.cu
 │   ├── gpu_kernels_optimized_1.h
@@ -69,7 +69,7 @@ ParallelProgramming_FinalProject/
 │   ├── gpu_kernels_optimized_2.h
 │   └── gpu_kernels_optimized_2.cu
 │
-├── features/                     		# Thư mục chứa các feature được trích xuất
+├── features/                     		  # Thư mục chứa các feature được trích xuất
 │   ├── cpu
 │   │   ├── train_features.bin
 │   │   └── test_features.bin
@@ -80,7 +80,7 @@ ParallelProgramming_FinalProject/
 │   ├── gpu_optimized_2
 │   │   └── ...
 │
-├── include/                      		# Header files
+├── include/                      		  # Header files
 │   ├── cifar10_loader.h
 │   ├── autoencoder_cpu.h
 │   ├── autoencoder_gpu.h
@@ -88,7 +88,7 @@ ParallelProgramming_FinalProject/
 │   ├── autoencoder_gpu_optimized_2.h
 │   └── svm_classifier.h
 │
-├── src/                          		# Source code
+├── src/                          		  # Source code
 │   ├── cifar10_loader.cu
 │   ├── reconstruct.cu
 │   ├── autoencoder_cpu.cu
@@ -102,7 +102,7 @@ ParallelProgramming_FinalProject/
 │   ├── main_phase4_extract_features.cu
 │   └── main_phase4_svm.py
 │
-└── weights/                      		# Model weights (autoencoder + SVM)
+└── weights/                      		  # Model weights (autoencoder + SVM)
     ├── autoencoder_cpu.bin
     ├── autoencoder_gpu_naive.bin
     ├── autoencoder_gpu_optimized_1.bin
