@@ -16,7 +16,7 @@ Dự án cài đặt Convolutional Autoencoder với CUDA để:
   - **Trên YouTube:** https://youtu.be/t24qL6xpUZU?si=jAYVicyo1HGTs1dJ
   - **Trên Canva:** https://www.canva.com/design/DAG8qvALO5Y/ZOBVLpUFHOG3ENcw9e15Cw/watch?utm_content=DAG8qvALO5Y&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=h500bb1731b
 - **Link tải các file trained model weights:** https://drive.google.com/drive/folders/1_9SD671-2aCp7fOv6_UFN-nRU7vNVjrT?usp=drive_link
-- **Link phân chia công việc:** https://docs.google.com/spreadsheets/d/1zBUC5w0loXZBdacXQkIbRTPzIY1SLwtZWEZZgTzKQlA/edit?usp=sharing
+- **Link phân chia công việc:** https://docs.google.com/spreadsheets/d/1zBUC5w0loXZBdacXQkIbRTPzIY1SLwtZWEZZgTzKQlA/edit?usp=drive_link
 
 ---
 
